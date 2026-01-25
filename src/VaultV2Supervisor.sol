@@ -84,10 +84,6 @@ contract VaultV2Supervisor {
     // Vault V2 Owner functions with no timelock
     ////////////////////////////////////////////////////////
 
-    function setOwner(IVaultV2 vault, address newOwner) external onlyOwner {
-        vault.setOwner(newOwner);
-    }
-
     function setCurator(IVaultV2 vault, address newCurator) external onlyOwner {
         vault.setCurator(newCurator);
     }
@@ -118,6 +114,14 @@ contract VaultV2Supervisor {
     ////////////////////////////////////////////////////////
     // Timelocked function that guardians can challenge
     ////////////////////////////////////////////////////////
+
+
+    function setOwner(IVaultV2 vault, address newOwner) external onlyOwner {
+        timelocked();
+
+        vault.setOwner(newOwner);
+    }
+
 
     function removeSentinel(IVaultV2 vault, address sentinel) external {
         timelocked();
