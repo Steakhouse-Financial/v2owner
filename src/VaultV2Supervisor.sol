@@ -22,6 +22,7 @@ contract VaultV2Supervisor {
 
     mapping(bytes data => uint256) public executableAt;
 
+    // TODO: Can we have a nice list of guardians per vault?
     mapping(address vault => mapping(address guardian => bool)) private _guardians;
 
     // Owner only modifier
