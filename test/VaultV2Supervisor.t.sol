@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.28;
+pragma solidity ^0.8.33;
 
 import "forge-std/Test.sol";
 import { VaultV2Supervisor } from "src/VaultV2Supervisor.sol";
@@ -48,6 +48,15 @@ contract VaultV2SupervisorTest is Test {
         // After revoke, execution should fail: DataNotTimelocked
         vm.expectRevert(VaultV2Supervisor.DataNotTimelocked.selector);
         supervisor.removeSentinel(IVaultV2(address(vault)), SENTINEL);
+    }
+
+    function test_AddGuardian_RevertsWhenVaultOwnerNotAllowed() public {
+        address disallowedOwner = address(0xB0B);
+        MockVaultV2 disallowedVault = new MockVaultV2(disallowedOwner);
+
+        vm.prank(disallowedOwner);
+        vm.expectRevert(VaultV2Supervisor.OnlyOwnerOrVaultOwner.selector);
+        supervisor.addGuardian(IVaultV2(address(disallowedVault)), GUARDIAN);
     }
 
     function test_Timelocked_RemoveSentinel_Flow() public {
@@ -106,9 +115,9 @@ contract VaultV2SupervisorTest is Test {
 
     function test_Timelocked_SetOwner() public {
         address newOwner = address(0x999);
-        bytes memory data = abi.encodeWithSelector(
-            VaultV2Supervisor.setOwner.selector,
-            IVaultV2(address(vault)),
+        bytes memory data = abi.encodeWithSignature(
+            "setOwner(address,address)",
+            address(vault),
             newOwner
         );
         supervisor.submit(data);
