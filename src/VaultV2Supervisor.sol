@@ -35,6 +35,8 @@ contract VaultV2Supervisor {
     error NotAllowedVaultOwner();
     /// @dev Operation would not change state.
     error NoOp();
+    /// @dev Sentinel removal attempted for the supervisor address.
+    error CannotRemoveSupervisorSentinel();
 
     /// @notice Emitted when the supervisor owner changes.
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -187,7 +189,7 @@ contract VaultV2Supervisor {
     /// @param sentinel The sentinel address to remove.
     function removeSentinel(IVaultV2 vault, address sentinel) external onlyOwner {
         timelocked();
-        require(sentinel != address(this), "Supervisor can't be removed as sentinel");
+        require(sentinel != address(this), CannotRemoveSupervisorSentinel());
         vault.setIsSentinel(sentinel, false);
     }
 
