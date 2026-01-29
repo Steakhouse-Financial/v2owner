@@ -24,16 +24,21 @@ contract VaultV2Supervisor {
     error DataNotTimelocked();
     error OnlyOwnerOrGuardian();
     error InvalidAmount();
+    error NotAllowedVaultOwner();
+    error NoOp();
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event RemoveSentinelSubmitted(address indexed vault, address indexed account, uint256 executeAfter);
     event RemoveSentinelRevoked(address indexed vault, address indexed account, address indexed guardian);
     event RemoveSentinelAccepted(address indexed vault, address indexed account);
+    event AllowedVaultOwnerSet(address indexed vaultOwner, bool allowed);
 
     address public owner;
     uint256 public immutable timelock; // in seconds
 
     mapping(bytes data => uint256) public executableAt;
+
+    mapping(address vaultOwner => bool) public allowedVaultOwners;
 
     mapping(address vault => EnumerableSet.AddressSet) private _guardians;
 
@@ -58,6 +63,7 @@ contract VaultV2Supervisor {
     /* Owner functions */
     function setOwner(address newOwner) external onlyOwner {
         require(newOwner != address(0), ZeroAddress());
+        require(newOwner != owner, NoOp());
         address previous = owner;
         owner = newOwner;
         emit OwnershipTransferred(previous, newOwner);
@@ -102,19 +108,29 @@ contract VaultV2Supervisor {
     ////////////////////////////////////////////////////////
 
     function setCurator(IVaultV2 vault, address newCurator) external onlyOwner {
+        require(vault.curator() != newCurator, NoOp());
         vault.setCurator(newCurator);
     }
 
     function setName(IVaultV2 vault, string memory newName) external onlyOwner {
+        require(keccak256(bytes(vault.name())) != keccak256(bytes(newName)), NoOp());
         vault.setName(newName);
     }
 
     function setSymbol(IVaultV2 vault, string memory newSymbol) external onlyOwner {
+        require(keccak256(bytes(vault.symbol())) != keccak256(bytes(newSymbol)), NoOp());
         vault.setSymbol(newSymbol);
     }
 
     function addSentinel(IVaultV2 vault, address account) external onlyOwner {
         vault.setIsSentinel(account, true);
+    }
+
+    function setAllowedVaultOwner(address vaultOwner, bool allowed) external onlyOwner {
+        require(vaultOwner != address(0), ZeroAddress());
+        require(allowedVaultOwners[vaultOwner] != allowed, NoOp());
+        allowedVaultOwners[vaultOwner] = allowed;
+        emit AllowedVaultOwnerSet(vaultOwner, allowed);
     }
 
     /** @notice Adds a guardian for a vault
@@ -123,8 +139,11 @@ contract VaultV2Supervisor {
      * @dev Can be called by the owner or the vault owner so we can register a guardian before ownership transfer
      */
     function addGuardian(IVaultV2 vault, address guardian) external {
-        // TODO: need to protect that a bit more to avoid spam
-        require(msg.sender == owner || msg.sender == vault.owner(), OnlyOwnerOrVaultOwner());
+        address vaultOwner = vault.owner();
+        require(
+            msg.sender == owner || (msg.sender == vaultOwner && allowedVaultOwners[vaultOwner]),
+            OnlyOwnerOrVaultOwner()
+        );
         _guardians[address(vault)].add(guardian);
     }
 
@@ -140,6 +159,7 @@ contract VaultV2Supervisor {
     function setOwner(IVaultV2 vault, address newOwner) external onlyOwner {
         timelocked();
 
+        require(vault.owner() != newOwner, NoOp());
         vault.setOwner(newOwner);
     }
 
@@ -171,6 +191,7 @@ contract VaultV2Supervisor {
      * @dev This ensure that the supervisor can always act as a sentinel
      */
     function setSupervisorAsGuardian(IVaultV2 vault) external {
+        require(!vault.isSentinel(address(this)), NoOp());
         vault.setIsSentinel(address(this), true);
     }
 }

@@ -50,6 +50,15 @@ contract VaultV2SupervisorTest is Test {
         supervisor.removeSentinel(IVaultV2(address(vault)), SENTINEL);
     }
 
+    function test_AddGuardian_RevertsWhenVaultOwnerNotAllowed() public {
+        address disallowedOwner = address(0xB0B);
+        MockVaultV2 disallowedVault = new MockVaultV2(disallowedOwner);
+
+        vm.prank(disallowedOwner);
+        vm.expectRevert(VaultV2Supervisor.OnlyOwnerOrVaultOwner.selector);
+        supervisor.addGuardian(IVaultV2(address(disallowedVault)), GUARDIAN);
+    }
+
     function test_Timelocked_RemoveSentinel_Flow() public {
         // Add sentinel immediately
         supervisor.addSentinel(IVaultV2(address(vault)), SENTINEL);
