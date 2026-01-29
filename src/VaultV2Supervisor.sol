@@ -1,7 +1,7 @@
 /*
 // SPDX-License-Identifier: UNLICENSED
 */
-pragma solidity ^0.8.28;
+pragma solidity ^0.8.33;
 
 import { IVaultV2 } from "vault-v2/src/interfaces/IVaultV2.sol";
 import { EnumerableSet } from "openzeppelin-contracts/contracts/utils/structs/EnumerableSet.sol";
@@ -93,9 +93,8 @@ contract VaultV2Supervisor {
 
     function _extractVaultAddress(bytes calldata data) internal pure returns (address v) {
         // data = 4-byte selector + abi-encoded args; first arg is address(IVaultV2)
-        assembly {
-            v := shr(96, calldataload(add(data.offset, 4)))
-        }
+        if (data.length < 36) return address(0);
+        v = abi.decode(data[4:36], (address));
     }
 
     ////////////////////////////////////////////////////////

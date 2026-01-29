@@ -2,6 +2,7 @@
 src = "src"
 out = "out"
 libs = ["lib"]
+auto_detect_solc = true
 remappings = [
 	"vault-v2/=lib/vault-v2/",
 	"forge-std/=lib/forge-std/src/",

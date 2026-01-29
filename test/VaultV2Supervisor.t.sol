@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.28;
+pragma solidity ^0.8.33;
 
 import "forge-std/Test.sol";
 import { VaultV2Supervisor } from "src/VaultV2Supervisor.sol";
