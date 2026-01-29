@@ -4,6 +4,7 @@
 pragma solidity ^0.8.28;
 
 import { IVaultV2 } from "vault-v2/src/interfaces/IVaultV2.sol";
+import { EnumerableSet } from "openzeppelin-contracts/contracts/utils/structs/EnumerableSet.sol";
 
 /**
  * @title VaultV2Supervisor
@@ -11,6 +12,8 @@ import { IVaultV2 } from "vault-v2/src/interfaces/IVaultV2.sol";
  * @notice A contract to manage multiple VaultV2 contracts with timelocked owner functions and guardian protections.
  */
 contract VaultV2Supervisor {
+    using EnumerableSet for EnumerableSet.AddressSet;
+
     error NotOwner();
     error ZeroAddress();
     error NotGuardian();
@@ -32,8 +35,7 @@ contract VaultV2Supervisor {
 
     mapping(bytes data => uint256) public executableAt;
 
-    // TODO: Can we have a nice list of guardians per vault?
-    mapping(address vault => mapping(address guardian => bool)) private _guardians;
+    mapping(address vault => EnumerableSet.AddressSet) private _guardians;
 
     // Owner only modifier
     modifier onlyOwner() {
@@ -43,7 +45,7 @@ contract VaultV2Supervisor {
 
     // Guardian only modifier, a guardian is a sentinel on the underlying vault
     modifier onlyGuardian(IVaultV2 vault) {
-        if(!_guardians[address(vault)][msg.sender]) revert NotGuardian();
+        if (!_guardians[address(vault)].contains(msg.sender)) revert NotGuardian();
         _;
     }
 
@@ -83,7 +85,7 @@ contract VaultV2Supervisor {
 
     function revoke(bytes calldata data) external {
         address vault = _extractVaultAddress(data);
-        if (!_guardians[vault][msg.sender] && msg.sender != owner) revert OnlyOwnerOrGuardian();
+        if (!_guardians[vault].contains(msg.sender) && msg.sender != owner) revert OnlyOwnerOrGuardian();
         if (executableAt[data] == 0) revert DataNotTimelocked();
 
         executableAt[data] = 0;
@@ -124,7 +126,11 @@ contract VaultV2Supervisor {
     function addGuardian(IVaultV2 vault, address guardian) external {
         // TODO: need to protect that a bit more to avoid spam
         require(msg.sender == owner || msg.sender == vault.owner(), OnlyOwnerOrVaultOwner());
-        _guardians[address(vault)][guardian] = true;
+        _guardians[address(vault)].add(guardian);
+    }
+
+    function getGuardians(IVaultV2 vault) external view returns (address[] memory) {
+        return _guardians[address(vault)].values();
     }
 
     ////////////////////////////////////////////////////////
@@ -149,7 +155,7 @@ contract VaultV2Supervisor {
     function removeGuardian(IVaultV2 vault, address guardian) external onlyOwner {
         timelocked();
 
-        _guardians[address(vault)][guardian] = false;
+        _guardians[address(vault)].remove(guardian);
     }
 
     ////////////////////////////////////////////////////////
