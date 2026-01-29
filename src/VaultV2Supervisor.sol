@@ -5,12 +5,22 @@ pragma solidity ^0.8.28;
 
 import { IVaultV2 } from "vault-v2/src/interfaces/IVaultV2.sol";
 
+/**
+ * @title VaultV2Supervisor
+ * @author Steakhouse Financial
+ * @notice A contract to manage multiple VaultV2 contracts with timelocked owner functions and guardian protections.
+ */
 contract VaultV2Supervisor {
     error NotOwner();
     error ZeroAddress();
     error NotGuardian();
     error NoPendingRemoval();
     error TimelockNotExpired();
+    error OnlyOwnerOrVaultOwner();
+    error DataAlreadyTimelocked();
+    error DataNotTimelocked();
+    error OnlyOwnerOrGuardian();
+    error InvalidAmount();
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event RemoveSentinelSubmitted(address indexed vault, address indexed account, uint256 executeAfter);
@@ -18,7 +28,7 @@ contract VaultV2Supervisor {
     event RemoveSentinelAccepted(address indexed vault, address indexed account);
 
     address public owner;
-    uint256 public timelock; // in seconds
+    uint256 public immutable timelock; // in seconds
 
     mapping(bytes data => uint256) public executableAt;
 
@@ -40,7 +50,7 @@ contract VaultV2Supervisor {
     constructor() {
         owner = msg.sender;
         emit OwnershipTransferred(address(0), msg.sender);
-        timelock = 7 days;
+        timelock = 14 days;
     }
 
     /* Owner functions */
@@ -57,27 +67,33 @@ contract VaultV2Supervisor {
     ////////////////////////////////////////////////////////
 
     function submit(bytes calldata data) external onlyOwner {
-        require(executableAt[data] == 0, DataAlreadyTimelocked());
-        require(data.length >= 4, InvalidAmount());
+        if (executableAt[data] != 0) revert DataAlreadyTimelocked();
+        if (data.length < 4) revert InvalidAmount();
 
         executableAt[data] = block.timestamp + timelock;
     }
 
     function timelocked() internal {
-        require(executableAt[msg.data] > 0, DataNotTimelocked());
-        require(block.timestamp >= executableAt[msg.data], TimelockNotExpired());
+        uint256 eta = executableAt[msg.data];
+        if (eta == 0) revert DataNotTimelocked();
+        if (block.timestamp < eta) revert TimelockNotExpired();
 
         executableAt[msg.data] = 0;
     }
 
     function revoke(bytes calldata data) external {
-        address vault = address(bytes20(data[4:24])); // TODO: extract the vault address from the data
-        require(_guardians[vault][msg.sender] || msg.sender == owner, OnlyOwnerOrGuardian());
-        require(executableAt[data] > 0, DataNotTimelocked());
+        address vault = _extractVaultAddress(data);
+        if (!_guardians[vault][msg.sender] && msg.sender != owner) revert OnlyOwnerOrGuardian();
+        if (executableAt[data] == 0) revert DataNotTimelocked();
 
         executableAt[data] = 0;
+    }
 
-        emit TimelockRevoked(bytes4(data), data, msg.sender);
+    function _extractVaultAddress(bytes calldata data) internal pure returns (address v) {
+        // data = 4-byte selector + abi-encoded args; first arg is address(IVaultV2)
+        assembly {
+            v := shr(96, calldataload(add(data.offset, 4)))
+        }
     }
 
     ////////////////////////////////////////////////////////
@@ -122,14 +138,15 @@ contract VaultV2Supervisor {
         vault.setOwner(newOwner);
     }
 
-
-    function removeSentinel(IVaultV2 vault, address sentinel) external {
+    function removeSentinel(IVaultV2 vault, address sentinel) external onlyOwner {
         timelocked();
+
+        require(sentinel != address(this), "Supervisor can't be removed as sentinel");
 
         vault.setIsSentinel(sentinel, false);
     }
 
-    function removeGuardian(IVaultV2 vault, address guardian) external {
+    function removeGuardian(IVaultV2 vault, address guardian) external onlyOwner {
         timelocked();
 
         _guardians[address(vault)][guardian] = false;
@@ -138,7 +155,17 @@ contract VaultV2Supervisor {
     ////////////////////////////////////////////////////////
     // Guardian functions to protect the vault
     ////////////////////////////////////////////////////////
-    function revoke(IVaultV2 vault, bytes data) external onlyGuardian(vault) {
+    function revoke(IVaultV2 vault, bytes memory data) external onlyGuardian(vault) {
         vault.revoke(data);
+    }
+
+
+    /**
+     * @notice Sets the supervisor contract as a sentinel on the vault (permissionless)
+     * @param vault The vault to set the sentinel on
+     * @dev This ensure that the supervisor can always act as a sentinel
+     */
+    function setSupervisorAsGuardian(IVaultV2 vault) external {
+        vault.setIsSentinel(address(this), true);
     }
 }

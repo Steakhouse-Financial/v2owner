@@ -1,66 +1,56 @@
-## Foundry
+# VaultV2Supervisor
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+VaultV2Supervisor is an ownership and safety module intended to operate as the privileged controller for one or more Vault V2 instances. It provides:
 
-Foundry consists of:
+- A standard owner role with two-step ownership transfer.
+- A guardian role that can revoke sensitive actions before they execute during the timelock.
+- A timelocked flow for removing sentinels on the vault, so removals cannot be executed immediately and can be revoked by a guardian while pending.
+- Pass-through to call selected `IVaultV2` owner functions (e.g., `setCurator`, `setName`, `setSymbol`).
 
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+The contract is at [src/VaultV2Supervisor.sol](src/VaultV2Supervisor.sol).
 
-## Documentation
+## Overview
 
-https://book.getfoundry.sh/
+`VaultV2Supervisor` assumes it holds the `owner` privileges on one or more Vault V2 (`IVaultV2`) contracts. Rather than calling the vault directly, operators call the vault via `VaultV2Supervisor`, which adds delay and revocation controls to riskier operations like removing sentinels and changing ownership.
 
-## Usage
+### Roles
+- **Owner**: Full admin of `VaultV2Supervisor`. Can perform safe vault admin calls, submit timelocked actions, and execute them after delay.
+- **Guardian**: A vault-specific safety role, registered per vault via `addGuardian(vault, guardian)`. Guardians can revoke pending timelocked actions for that vault (issued at the Supervisor or at the Vault level).
 
-### Build
+### Timelock Model
+Supervisor uses a generic timelock keyed by calldata:
 
-```shell
-$ forge build
-```
+1. Owner calls `submit(bytes data)` to schedule any timelocked action. `data` is the full calldata of the target function to be executed later.
+2. After `timelock` (default 14 days), the Owner calls the target function; execution checks `timelocked()` internally to enforce the delay.
+3. A guardian of the relevant vault or the Owner can `revoke(bytes data)` to cancel a pending action before it executes.
 
-### Test
+Default timelock: 14 days (immutable).
 
-```shell
-$ forge test
-```
+## Public API (selected)
 
-### Format
+Core ownership:
+- `owner()` / `pendingOwner()`
+- `transferOwnership(address newOwner)` → emits `OwnershipTransferStarted`
+- `acceptOwnership()` → finalizes transfer
+- `renounceOwnership()` → sets owner to zero
+- `setOwner(address newOwner)` → direct owner set (use with care)
 
-```shell
-$ forge fmt
-```
+Guardians:
+- `addGuardian(IVaultV2 vault, address guardian)` → register guardian for a vault
+- `removeGuardian(IVaultV2 vault, address guardian)` → timelocked removal of guardian
 
-### Gas Snapshots
+Sentinel management:
+- `addSentinel(IVaultV2 vault, address account)` → immediate add
+- `removeSentinel(IVaultV2 vault, address account)` → timelocked removal (requires prior `submit` with matching calldata)
 
-```shell
-$ forge snapshot
-```
+Vault owner helpers (no timelock):
+- `setCurator(IVaultV2 vault, address newCurator)`
+- `setName(IVaultV2 vault, string newName)`
+- `setSymbol(IVaultV2 vault, string newSymbol)`
 
-### Anvil
+Events:
+- `OwnershipTransferred(previousOwner, newOwner)`
+- `RemoveSentinelSubmitted(vault, account, executeAfter)`
+- `RemoveSentinelRevoked(vault, account, guardian)`
+- `RemoveSentinelAccepted(vault, account)`
 
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
