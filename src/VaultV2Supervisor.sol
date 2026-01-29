@@ -39,13 +39,13 @@ contract VaultV2Supervisor {
 
     // Owner only modifier
     modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
+        require(msg.sender == owner, NotOwner());
         _;
     }
 
     // Guardian only modifier, a guardian is a sentinel on the underlying vault
     modifier onlyGuardian(IVaultV2 vault) {
-        if (!_guardians[address(vault)].contains(msg.sender)) revert NotGuardian();
+        require(_guardians[address(vault)].contains(msg.sender), NotGuardian());
         _;
     }
 
@@ -57,7 +57,7 @@ contract VaultV2Supervisor {
 
     /* Owner functions */
     function setOwner(address newOwner) external onlyOwner {
-        if (newOwner == address(0)) revert ZeroAddress();
+        require(newOwner != address(0), ZeroAddress());
         address previous = owner;
         owner = newOwner;
         emit OwnershipTransferred(previous, newOwner);
@@ -69,24 +69,24 @@ contract VaultV2Supervisor {
     ////////////////////////////////////////////////////////
 
     function submit(bytes calldata data) external onlyOwner {
-        if (executableAt[data] != 0) revert DataAlreadyTimelocked();
-        if (data.length < 4) revert InvalidAmount();
+        require(executableAt[data] == 0, DataAlreadyTimelocked());
+        require(data.length >= 4, InvalidAmount());
 
         executableAt[data] = block.timestamp + timelock;
     }
 
     function timelocked() internal {
         uint256 eta = executableAt[msg.data];
-        if (eta == 0) revert DataNotTimelocked();
-        if (block.timestamp < eta) revert TimelockNotExpired();
+        require(eta != 0, DataNotTimelocked());
+        require(block.timestamp >= eta, TimelockNotExpired());
 
         executableAt[msg.data] = 0;
     }
 
     function revoke(bytes calldata data) external {
         address vault = _extractVaultAddress(data);
-        if (!_guardians[vault].contains(msg.sender) && msg.sender != owner) revert OnlyOwnerOrGuardian();
-        if (executableAt[data] == 0) revert DataNotTimelocked();
+        require(_guardians[vault].contains(msg.sender) || msg.sender == owner, OnlyOwnerOrGuardian());
+        require(executableAt[data] != 0, DataNotTimelocked());
 
         executableAt[data] = 0;
     }

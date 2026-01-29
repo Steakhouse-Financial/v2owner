@@ -106,9 +106,9 @@ contract VaultV2SupervisorTest is Test {
 
     function test_Timelocked_SetOwner() public {
         address newOwner = address(0x999);
-        bytes memory data = abi.encodeWithSelector(
-            VaultV2Supervisor.setOwner.selector,
-            IVaultV2(address(vault)),
+        bytes memory data = abi.encodeWithSignature(
+            "setOwner(address,address)",
+            address(vault),
             newOwner
         );
         supervisor.submit(data);
