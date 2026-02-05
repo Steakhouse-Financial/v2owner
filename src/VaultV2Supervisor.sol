@@ -6,7 +6,7 @@ import { EnumerableSet } from "openzeppelin-contracts/contracts/utils/structs/En
 
 /// @title VaultV2Supervisor
 /// @author Steakhouse Financial
-/// @notice Supervises Vault V2 instances with timelocked owner actions and guardian vetoes.
+/// @notice Act as improved owner for Vault V2 instances with timelocked owner actions and guardian vetoes.
 /// @dev The supervisor is intended to own one or more Vault V2 contracts.
 contract VaultV2Supervisor {
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -18,7 +18,7 @@ contract VaultV2Supervisor {
     /// @dev Caller is not a registered guardian for the vault.
     error NotGuardian();
     /// @dev Reserved for future use.
-    error NoPendingRemoval();
+    //error NoPendingRemoval();
     /// @dev Timelock has not expired yet.
     error TimelockNotExpired();
     /// @dev Caller is neither the supervisor owner nor the vault owner.
@@ -32,7 +32,7 @@ contract VaultV2Supervisor {
     /// @dev Calldata length is invalid.
     error InvalidAmount();
     /// @dev Vault owner is not allowlisted to self-manage guardians.
-    error NotAllowedVaultOwner();
+    //error NotAllowedVaultOwner();
     /// @dev Operation would not change state.
     error NoOp();
     /// @dev Sentinel removal attempted for the supervisor address.
@@ -41,11 +41,11 @@ contract VaultV2Supervisor {
     /// @notice Emitted when the supervisor owner changes.
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     /// @notice Emitted when a sentinel removal is scheduled.
-    event RemoveSentinelSubmitted(address indexed vault, address indexed account, uint256 executeAfter);
+    //event RemoveSentinelSubmitted(address indexed vault, address indexed account, uint256 executeAfter);
     /// @notice Emitted when a sentinel removal is revoked.
-    event RemoveSentinelRevoked(address indexed vault, address indexed account, address indexed guardian);
+    //event RemoveSentinelRevoked(address indexed vault, address indexed account, address indexed guardian);
     /// @notice Emitted when a sentinel removal is executed.
-    event RemoveSentinelAccepted(address indexed vault, address indexed account);
+    //event RemoveSentinelAccepted(address indexed vault, address indexed account);
     /// @notice Emitted when a vault owner is allowlisted or removed.
     event AllowedVaultOwnerSet(address indexed vaultOwner, bool allowed);
 
@@ -96,6 +96,7 @@ contract VaultV2Supervisor {
         require(executableAt[data] == 0, DataAlreadyTimelocked());
         require(data.length >= 4, InvalidAmount());
         executableAt[data] = block.timestamp + timelock;
+        // TODO: Event sender, vault, selector, calldata
     }
 
     /// @notice Cancels a pending timelocked action.
@@ -105,6 +106,7 @@ contract VaultV2Supervisor {
         require(_guardians[vault].contains(msg.sender) || msg.sender == owner, OnlyOwnerOrGuardian());
         require(executableAt[data] != 0, DataNotTimelocked());
         executableAt[data] = 0;
+        // TODO: Event add sender
     }
 
     /// @dev Validates and consumes the timelock for the current calldata.
@@ -160,18 +162,19 @@ contract VaultV2Supervisor {
     /// @param vault The vault to add the guardian for.
     /// @param guardian The guardian address to add.
     /// @dev Vault owners can call only if allowlisted; the supervisor owner can always call.
-    function addGuardian(IVaultV2 vault, address guardian) external {
-        address vaultOwner = vault.owner();
+    function addGuardian(address vault, address guardian) external {
+        address vaultOwner = IVaultV2(vault).owner();
         require(
             msg.sender == owner || (msg.sender == vaultOwner && allowedVaultOwners[vaultOwner]),
             OnlyOwnerOrVaultOwner()
         );
-        _guardians[address(vault)].add(guardian);
+        _guardians[vault].add(guardian);
+        // TODO: Event
     }
 
     /// @notice Returns the guardians registered for a vault.
     /// @param vault The vault to query.
-    function getGuardians(IVaultV2 vault) external view returns (address[] memory) {
+    function getGuardians(address vault) external view returns (address[] memory) {
         return _guardians[address(vault)].values();
     }
 
@@ -188,7 +191,7 @@ contract VaultV2Supervisor {
     /// @param vault The vault to update.
     /// @param sentinel The sentinel address to remove.
     function removeSentinel(IVaultV2 vault, address sentinel) external onlyOwner {
-        timelocked();
+        // timelocked(); TODO: Do we really need a timelock?
         require(sentinel != address(this), CannotRemoveSupervisorSentinel());
         vault.setIsSentinel(sentinel, false);
     }
@@ -199,18 +202,23 @@ contract VaultV2Supervisor {
     function removeGuardian(IVaultV2 vault, address guardian) external onlyOwner {
         timelocked();
         _guardians[address(vault)].remove(guardian);
+        // TODO Event
     }
 
     /// @notice Forwards a revoke to the vault's timelock.
     /// @param vault The vault to target.
     /// @param data The vault calldata to revoke.
-    function revoke(IVaultV2 vault, bytes memory data) external onlyGuardian(vault) {
+    function revoke(address vault, bytes memory data) external onlyGuardian(vault) {
+        // TODO cast a interface that just has revoke so we can use it on Box as well
         vault.revoke(data);
+        // TODO: event with selector, vault, sender, data
     }
 
     /// @notice Sets the supervisor contract as a sentinel on a vault (permissionless).
     /// @param vault The vault to update.
-    function setSupervisorAsGuardian(IVaultV2 vault) external {
+    /// @dev This makes sure the supervisor can revoke submitted operations on behalf of the guardians.
+    /// @dev For a `Box` contract, the curator should add the supervisor as guardian manually.
+    function setSupervisorAsSentinel(IVaultV2 vault) external {
         require(!vault.isSentinel(address(this)), NoOp());
         vault.setIsSentinel(address(this), true);
     }
