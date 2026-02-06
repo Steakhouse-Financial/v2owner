@@ -5,7 +5,7 @@ import { IVaultV2 } from "vault-v2/src/interfaces/IVaultV2.sol";
 import { EnumerableSet } from "openzeppelin-contracts/contracts/utils/structs/EnumerableSet.sol";
 
 interface IRevokable {
-    function revoke(bytes memory data) external;
+    function revoke(bytes calldata data) external;
 }
 
 interface ISkimRecipient {
@@ -111,15 +111,18 @@ contract VaultV2Supervisor {
     function submit(bytes calldata data) external onlyOwner {
         require(executableAt[data] == 0, DataAlreadyTimelocked());
         require(data.length >= 4, InvalidAmount());
+
         address vault = _extractVaultAddress(data);
-        bytes4 selector = _selectorFromCalldata(data);
+        bytes4 selector = _selector(data);
         uint256 executeAfter = block.timestamp + timelock;
-        if(selector == this.setOwner.selector) {
+
+        if (selector == this.setOwner.selector) {
             (address v, address newO) = abi.decode(data[4:], (address, address));
             require(v != address(0) && newO != address(0), ZeroAddress());
             require(newO != IVaultV2(v).owner(), NoOp());
             scheduledNewOwner[v] = newO;
         }
+
         executableAt[data] = executeAfter;
         emit TimelockSubmitted(msg.sender, vault, selector, data, executeAfter);
     }
@@ -128,10 +131,12 @@ contract VaultV2Supervisor {
     /// @param data Full calldata that was previously submitted.
     function revoke(bytes calldata data) external {
         address vault = _extractVaultAddress(data);
+
         require(_guardians[vault].contains(msg.sender) || msg.sender == owner, OnlyOwnerOrGuardian());
         require(executableAt[data] != 0, DataNotTimelocked());
+
         executableAt[data] = 0;
-        emit TimelockRevoked(msg.sender, vault, _selectorFromCalldata(data), data);
+        emit TimelockRevoked(msg.sender, vault, _selector(data), data);
     }
 
     /// @dev Validates and consumes the timelock for the current calldata.
@@ -153,7 +158,7 @@ contract VaultV2Supervisor {
     /// @notice Sets the name on a vault (no timelock).
     /// @param vault The vault to update.
     /// @param newName The new name.
-    function setName(IVaultV2 vault, string memory newName) external onlyOwner {
+    function setName(IVaultV2 vault, string calldata newName) external onlyOwner {
         require(keccak256(bytes(vault.name())) != keccak256(bytes(newName)), NoOp());
         vault.setName(newName);
     }
@@ -161,7 +166,7 @@ contract VaultV2Supervisor {
     /// @notice Sets the symbol on a vault (no timelock).
     /// @param vault The vault to update.
     /// @param newSymbol The new symbol.
-    function setSymbol(IVaultV2 vault, string memory newSymbol) external onlyOwner {
+    function setSymbol(IVaultV2 vault, string calldata newSymbol) external onlyOwner {
         require(keccak256(bytes(vault.symbol())) != keccak256(bytes(newSymbol)), NoOp());
         vault.setSymbol(newSymbol);
     }
@@ -242,10 +247,9 @@ contract VaultV2Supervisor {
     /// @notice Forwards a revoke to the vault's timelock.
     /// @param vault The vault to target.
     /// @param data The vault calldata to revoke.
-    function revoke(address vault, bytes memory data) external onlyGuardian(vault) {
-        // TODO set newOwner(vault) to address(0) if it was a new owner
+    function revoke(address vault, bytes calldata data) external onlyGuardian(vault) {
         IRevokable(vault).revoke(data);
-        emit VaultRevokeForwarded(msg.sender, vault, _selectorFromMemory(data), data);
+        emit VaultRevokeForwarded(msg.sender, vault, _selector(data), data);
     }
 
     /// @notice Sets the supervisor contract as a sentinel on a vault (permissionless).
@@ -265,32 +269,33 @@ contract VaultV2Supervisor {
         v = abi.decode(data[4:36], (address));
     }
 
-    function _selectorFromCalldata(bytes calldata data) internal pure returns (bytes4 selector) {
+    function _selector(bytes calldata data) internal pure returns (bytes4 selector) {
         if (data.length < 4) return bytes4(0);
         assembly {
             selector := calldataload(data.offset)
         }
     }
 
-    function _selectorFromMemory(bytes memory data) internal pure returns (bytes4 selector) {
-        if (data.length < 4) return bytes4(0);
-        assembly {
-            selector := mload(add(data, 32))
-        }
-    }
+    /// @notice Returns whether a vault ownership transfer is currently scheduled.
+    /// @param vault The vault to query.
     function isOwnershipChanging(address vault) external view returns (bool) {
         return scheduledNewOwner[vault] != address(0);
     }
 
+    /// @notice Returns whether guardian removal is currently scheduled.
+    /// @param vault The vault to query.
+    /// @param guardian The guardian to query.
     function isGuardianBeingRemoved(address vault, address guardian) external view returns (bool) {
         bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeGuardian.selector, vault, guardian);
         return executableAt[data] > 0;
     }
 
+    /// @notice Returns whether sentinel removal is currently scheduled.
+    /// @param vault The vault to query.
+    /// @param sentinel The sentinel to query.
     function isSentinelBeingRemoved(address vault, address sentinel) external view returns (bool) {
         bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, sentinel);
         return executableAt[data] > 0;
-        
     }
 
 }
