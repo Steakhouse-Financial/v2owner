@@ -4,6 +4,10 @@ pragma solidity ^0.8.33;
 import { IVaultV2 } from "vault-v2/src/interfaces/IVaultV2.sol";
 import { EnumerableSet } from "openzeppelin-contracts/contracts/utils/structs/EnumerableSet.sol";
 
+interface IRevokable {
+    function revoke(bytes memory data) external;
+}
+
 /// @title VaultV2Supervisor
 /// @author Steakhouse Financial
 /// @notice Act as improved owner for Vault V2 instances with timelocked owner actions and guardian vetoes.
@@ -48,6 +52,22 @@ contract VaultV2Supervisor {
     //event RemoveSentinelAccepted(address indexed vault, address indexed account);
     /// @notice Emitted when a vault owner is allowlisted or removed.
     event AllowedVaultOwnerSet(address indexed vaultOwner, bool allowed);
+    /// @notice Emitted when a timelocked action is submitted.
+    event TimelockSubmitted(
+        address indexed sender,
+        address indexed vault,
+        bytes4 indexed selector,
+        bytes data,
+        uint256 executeAfter
+    );
+    /// @notice Emitted when a timelocked action is revoked.
+    event TimelockRevoked(address indexed sender, address indexed vault, bytes4 indexed selector, bytes data);
+    /// @notice Emitted when a guardian is added for a vault.
+    event GuardianAdded(address indexed vault, address indexed guardian, address indexed sender);
+    /// @notice Emitted when a guardian is removed for a vault.
+    event GuardianRemoved(address indexed vault, address indexed guardian, address indexed sender);
+    /// @notice Emitted when a vault-level revoke is forwarded.
+    event VaultRevokeForwarded(address indexed sender, address indexed vault, bytes4 indexed selector, bytes data);
 
     /// @notice Address of the supervisor owner.
     address public owner;
@@ -95,8 +115,11 @@ contract VaultV2Supervisor {
     function submit(bytes calldata data) external onlyOwner {
         require(executableAt[data] == 0, DataAlreadyTimelocked());
         require(data.length >= 4, InvalidAmount());
-        executableAt[data] = block.timestamp + timelock;
-        // TODO: Event sender, vault, selector, calldata
+        address vault = _extractVaultAddress(data);
+        bytes4 selector = _selector(data);
+        uint256 executeAfter = block.timestamp + timelock;
+        executableAt[data] = executeAfter;
+        emit TimelockSubmitted(msg.sender, vault, selector, data, executeAfter);
     }
 
     /// @notice Cancels a pending timelocked action.
@@ -106,7 +129,7 @@ contract VaultV2Supervisor {
         require(_guardians[vault].contains(msg.sender) || msg.sender == owner, OnlyOwnerOrGuardian());
         require(executableAt[data] != 0, DataNotTimelocked());
         executableAt[data] = 0;
-        // TODO: Event add sender
+        emit TimelockRevoked(msg.sender, vault, _selector(data), data);
     }
 
     /// @dev Validates and consumes the timelock for the current calldata.
@@ -169,7 +192,7 @@ contract VaultV2Supervisor {
             OnlyOwnerOrVaultOwner()
         );
         _guardians[vault].add(guardian);
-        // TODO: Event
+        emit GuardianAdded(vault, guardian, msg.sender);
     }
 
     /// @notice Returns the guardians registered for a vault.
@@ -191,7 +214,6 @@ contract VaultV2Supervisor {
     /// @param vault The vault to update.
     /// @param sentinel The sentinel address to remove.
     function removeSentinel(IVaultV2 vault, address sentinel) external onlyOwner {
-        // timelocked(); TODO: Do we really need a timelock?
         require(sentinel != address(this), CannotRemoveSupervisorSentinel());
         vault.setIsSentinel(sentinel, false);
     }
@@ -202,16 +224,15 @@ contract VaultV2Supervisor {
     function removeGuardian(IVaultV2 vault, address guardian) external onlyOwner {
         timelocked();
         _guardians[address(vault)].remove(guardian);
-        // TODO Event
+        emit GuardianRemoved(address(vault), guardian, msg.sender);
     }
 
     /// @notice Forwards a revoke to the vault's timelock.
     /// @param vault The vault to target.
     /// @param data The vault calldata to revoke.
     function revoke(address vault, bytes memory data) external onlyGuardian(vault) {
-        // TODO cast a interface that just has revoke so we can use it on Box as well
-        vault.revoke(data);
-        // TODO: event with selector, vault, sender, data
+        IRevokable(vault).revoke(data);
+        emit VaultRevokeForwarded(msg.sender, vault, _selector(data), data);
     }
 
     /// @notice Sets the supervisor contract as a sentinel on a vault (permissionless).
@@ -229,5 +250,19 @@ contract VaultV2Supervisor {
     function _extractVaultAddress(bytes calldata data) internal pure returns (address v) {
         if (data.length < 36) return address(0);
         v = abi.decode(data[4:36], (address));
+    }
+
+    function _selector(bytes calldata data) internal pure returns (bytes4 selector) {
+        if (data.length < 4) return bytes4(0);
+        assembly {
+            selector := calldataload(data.offset)
+        }
+    }
+
+    function _selector(bytes memory data) internal pure returns (bytes4 selector) {
+        if (data.length < 4) return bytes4(0);
+        assembly {
+            selector := mload(add(data, 32))
+        }
     }
 }
