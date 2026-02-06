@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.28;
 
 import { IVaultV2 } from "vault-v2/src/interfaces/IVaultV2.sol";
 import { EnumerableSet } from "openzeppelin-contracts/contracts/utils/structs/EnumerableSet.sol";
@@ -88,8 +88,8 @@ contract VaultV2Supervisor {
     }
 
     /// @dev Restricts execution to a guardian registered for the vault.
-    modifier onlyGuardian(IVaultV2 vault) {
-        require(_guardians[address(vault)].contains(msg.sender), NotGuardian());
+    modifier onlyGuardian(address vault) {
+        require(_guardians[vault].contains(msg.sender), NotGuardian());
         _;
     }
 
@@ -116,7 +116,7 @@ contract VaultV2Supervisor {
         require(executableAt[data] == 0, DataAlreadyTimelocked());
         require(data.length >= 4, InvalidAmount());
         address vault = _extractVaultAddress(data);
-        bytes4 selector = _selector(data);
+        bytes4 selector = _selectorFromCalldata(data);
         uint256 executeAfter = block.timestamp + timelock;
         executableAt[data] = executeAfter;
         emit TimelockSubmitted(msg.sender, vault, selector, data, executeAfter);
@@ -129,7 +129,7 @@ contract VaultV2Supervisor {
         require(_guardians[vault].contains(msg.sender) || msg.sender == owner, OnlyOwnerOrGuardian());
         require(executableAt[data] != 0, DataNotTimelocked());
         executableAt[data] = 0;
-        emit TimelockRevoked(msg.sender, vault, _selector(data), data);
+        emit TimelockRevoked(msg.sender, vault, _selectorFromCalldata(data), data);
     }
 
     /// @dev Validates and consumes the timelock for the current calldata.
@@ -214,6 +214,7 @@ contract VaultV2Supervisor {
     /// @param vault The vault to update.
     /// @param sentinel The sentinel address to remove.
     function removeSentinel(IVaultV2 vault, address sentinel) external onlyOwner {
+        timelocked();
         require(sentinel != address(this), CannotRemoveSupervisorSentinel());
         vault.setIsSentinel(sentinel, false);
     }
@@ -232,7 +233,7 @@ contract VaultV2Supervisor {
     /// @param data The vault calldata to revoke.
     function revoke(address vault, bytes memory data) external onlyGuardian(vault) {
         IRevokable(vault).revoke(data);
-        emit VaultRevokeForwarded(msg.sender, vault, _selector(data), data);
+        emit VaultRevokeForwarded(msg.sender, vault, _selectorFromMemory(data), data);
     }
 
     /// @notice Sets the supervisor contract as a sentinel on a vault (permissionless).
@@ -252,14 +253,14 @@ contract VaultV2Supervisor {
         v = abi.decode(data[4:36], (address));
     }
 
-    function _selector(bytes calldata data) internal pure returns (bytes4 selector) {
+    function _selectorFromCalldata(bytes calldata data) internal pure returns (bytes4 selector) {
         if (data.length < 4) return bytes4(0);
         assembly {
             selector := calldataload(data.offset)
         }
     }
 
-    function _selector(bytes memory data) internal pure returns (bytes4 selector) {
+    function _selectorFromMemory(bytes memory data) internal pure returns (bytes4 selector) {
         if (data.length < 4) return bytes4(0);
         assembly {
             selector := mload(add(data, 32))

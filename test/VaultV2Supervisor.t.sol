@@ -1,134 +1,158 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
+import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+
 import { VaultV2Supervisor } from "src/VaultV2Supervisor.sol";
-import { MockVaultV2 } from "test/mocks/MockVaultV2.sol";
 import { IVaultV2 } from "vault-v2/src/interfaces/IVaultV2.sol";
+import { VaultV2Factory } from "vault-v2/src/VaultV2Factory.sol";
+
+import { IBox } from "box/src/interfaces/IBox.sol";
+import { BoxFactory } from "box/src/factories/BoxFactory.sol";
+
+import { TestAsset } from "test/helpers/TestAsset.sol";
 
 contract VaultV2SupervisorTest is Test {
     VaultV2Supervisor supervisor;
-    MockVaultV2 vault;
+    VaultV2Factory vaultFactory;
+    BoxFactory boxFactory;
+
+    TestAsset asset;
+    IVaultV2 vault;
+    IBox box;
+
     address OWNER = address(this);
+    address CURATOR = address(0xC0FFEE);
     address GUARDIAN = address(0xBEEF);
     address SENTINEL = address(0xCAFE);
 
     function setUp() public {
         supervisor = new VaultV2Supervisor();
-        vault = new MockVaultV2(OWNER);
+        vaultFactory = new VaultV2Factory();
+        boxFactory = new BoxFactory();
+        asset = new TestAsset("Test Asset", "TAST");
+
+        vault = IVaultV2(vaultFactory.createVaultV2(OWNER, address(asset), keccak256("vault-main")));
+        box = boxFactory.createBox(
+            IERC20(address(asset)),
+            OWNER,
+            OWNER,
+            "Test Box",
+            "TBOX",
+            0.005 ether,
+            1 days,
+            7 days,
+            1 days,
+            keccak256("box-main")
+        );
+
+        vault.setOwner(address(supervisor));
+        supervisor.setCurator(vault, CURATOR);
+        supervisor.setSupervisorAsSentinel(vault);
+        bytes memory guardianData = abi.encodeCall(IBox.setGuardian, (address(supervisor)));
+        box.submit(guardianData);
+        box.setGuardian(address(supervisor));
+        supervisor.setAllowedVaultOwner(OWNER, true);
     }
 
     function test_SetCurator_Name_Symbol() public {
-        // Only owner can call
-        supervisor.setCurator(IVaultV2(address(vault)), address(0x01));
+        supervisor.setCurator(vault, address(0x01));
         assertEq(vault.curator(), address(0x01));
 
-        supervisor.setName(IVaultV2(address(vault)), "TestVault");
+        supervisor.setName(vault, "TestVault");
         assertEq(vault.name(), "TestVault");
 
-        supervisor.setSymbol(IVaultV2(address(vault)), "TVLT");
+        supervisor.setSymbol(vault, "TVLT");
         assertEq(vault.symbol(), "TVLT");
     }
 
     function test_AddGuardian_byOwner_and_VaultOwner() public {
-        // Owner adds guardian
-        supervisor.addGuardian(IVaultV2(address(vault)), GUARDIAN);
-        // Simulate vault owner adding guardian
-        vm.prank(OWNER);
-        supervisor.addGuardian(IVaultV2(address(vault)), address(0xA11CE));
-        // No direct getter; rely on permission checks via revoke(bytes)
-        bytes memory data = abi.encodeWithSelector(
-            VaultV2Supervisor.removeSentinel.selector,
-            IVaultV2(address(vault)),
-            SENTINEL
-        );
-        // Owner can revoke
-        supervisor.submit(data);
-        supervisor.revoke(data);
-        // After revoke, execution should fail: DataNotTimelocked
-        vm.expectRevert(VaultV2Supervisor.DataNotTimelocked.selector);
-        supervisor.removeSentinel(IVaultV2(address(vault)), SENTINEL);
+        supervisor.addGuardian(address(vault), GUARDIAN);
+        assertEq(supervisor.getGuardians(address(vault))[0], GUARDIAN);
+
+        address vaultOwner = address(0xA11CE);
+        IVaultV2 otherVault = IVaultV2(vaultFactory.createVaultV2(vaultOwner, address(asset), keccak256("vault-other")));
+        supervisor.setAllowedVaultOwner(vaultOwner, true);
+
+        vm.prank(vaultOwner);
+        supervisor.addGuardian(address(otherVault), address(0xA11CE));
+        assertEq(supervisor.getGuardians(address(otherVault))[0], address(0xA11CE));
     }
 
     function test_AddGuardian_RevertsWhenVaultOwnerNotAllowed() public {
         address disallowedOwner = address(0xB0B);
-        MockVaultV2 disallowedVault = new MockVaultV2(disallowedOwner);
+        IVaultV2 disallowedVault =
+            IVaultV2(vaultFactory.createVaultV2(disallowedOwner, address(asset), keccak256("vault-disallowed")));
 
         vm.prank(disallowedOwner);
         vm.expectRevert(VaultV2Supervisor.OnlyOwnerOrVaultOwner.selector);
-        supervisor.addGuardian(IVaultV2(address(disallowedVault)), GUARDIAN);
+        supervisor.addGuardian(address(disallowedVault), GUARDIAN);
     }
 
     function test_Timelocked_RemoveSentinel_Flow() public {
-        // Add sentinel immediately
-        supervisor.addSentinel(IVaultV2(address(vault)), SENTINEL);
+        supervisor.addSentinel(vault, SENTINEL);
         assertTrue(vault.isSentinel(SENTINEL));
 
-        // Schedule removal via submit(bytes)
-        bytes memory data = abi.encodeWithSelector(
-            VaultV2Supervisor.removeSentinel.selector,
-            IVaultV2(address(vault)),
-            SENTINEL
-        );
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, SENTINEL);
         supervisor.submit(data);
 
-        // Before timelock expiry, execution reverts
         vm.expectRevert(VaultV2Supervisor.TimelockNotExpired.selector);
-        supervisor.removeSentinel(IVaultV2(address(vault)), SENTINEL);
+        supervisor.removeSentinel(vault, SENTINEL);
 
-        // Advance time beyond timelock (14 days)
         vm.warp(block.timestamp + 14 days + 1);
-        supervisor.removeSentinel(IVaultV2(address(vault)), SENTINEL);
+        supervisor.removeSentinel(vault, SENTINEL);
         assertFalse(vault.isSentinel(SENTINEL));
     }
 
     function test_RevokeByGuardian_CancelsSupervisorTimelock() public {
-        // Register guardian for this vault
-        supervisor.addGuardian(IVaultV2(address(vault)), GUARDIAN);
+        supervisor.addGuardian(address(vault), GUARDIAN);
 
-        bytes memory data = abi.encodeWithSelector(
-            VaultV2Supervisor.removeSentinel.selector,
-            IVaultV2(address(vault)),
-            SENTINEL
-        );
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, SENTINEL);
         supervisor.submit(data);
 
-        // Guardian revokes pending action
         vm.prank(GUARDIAN);
         supervisor.revoke(data);
 
-        // Now execution fails due to no timelock
         vm.expectRevert(VaultV2Supervisor.DataNotTimelocked.selector);
-        supervisor.removeSentinel(IVaultV2(address(vault)), SENTINEL);
+        supervisor.removeSentinel(vault, SENTINEL);
     }
 
     function test_GuardianCanRevokeVaultTimelock() public {
-        // Register guardian
-        supervisor.addGuardian(IVaultV2(address(vault)), GUARDIAN);
+        supervisor.addGuardian(address(vault), GUARDIAN);
 
-        // Guardian calls supervisor.revoke(vault, data) which proxies to vault.revoke(data)
-        bytes memory vdata = abi.encodeWithSelector(bytes4(0xDEADBEEF), uint256(123));
+        bytes memory vdata = abi.encodeCall(IVaultV2.setIsAllocator, (address(0x1234), true));
+        vm.prank(CURATOR);
+        vault.submit(vdata);
+        assertGt(vault.executableAt(vdata), 0);
+
         vm.prank(GUARDIAN);
-        supervisor.revoke(IVaultV2(address(vault)), vdata);
-        assertEq(vault.lastRevokeData(), vdata);
+        supervisor.revoke(address(vault), vdata);
+        assertEq(vault.executableAt(vdata), 0);
+    }
+
+    function test_GuardianCanRevokeBoxTimelock() public {
+        supervisor.addGuardian(address(box), GUARDIAN);
+
+        bytes memory bdata = abi.encodeCall(IBox.setIsFeeder, (address(0x1234), true));
+        box.submit(bdata);
+        assertGt(box.executableAt(bdata), 0);
+
+        vm.prank(GUARDIAN);
+        supervisor.revoke(address(box), bdata);
+        assertEq(box.executableAt(bdata), 0);
     }
 
     function test_Timelocked_SetOwner() public {
         address newOwner = address(0x999);
-        bytes memory data = abi.encodeWithSignature(
-            "setOwner(address,address)",
-            address(vault),
-            newOwner
-        );
+        bytes memory data = abi.encodeWithSignature("setOwner(address,address)", address(vault), newOwner);
         supervisor.submit(data);
 
-        // Not executable before timelock
         vm.expectRevert(VaultV2Supervisor.TimelockNotExpired.selector);
-        supervisor.setOwner(IVaultV2(address(vault)), newOwner);
+        supervisor.setOwner(vault, newOwner);
 
         vm.warp(block.timestamp + 14 days + 1);
-        supervisor.setOwner(IVaultV2(address(vault)), newOwner);
+        supervisor.setOwner(vault, newOwner);
         assertEq(vault.owner(), newOwner);
     }
-
 }
