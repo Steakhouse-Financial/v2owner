@@ -8,6 +8,10 @@ interface IRevokable {
     function revoke(bytes memory data) external;
 }
 
+interface ISkimRecipient {
+    function setSkimRecipient(address newSkimRecipient) external;
+}
+
 /// @title VaultV2Supervisor
 /// @author Steakhouse Financial
 /// @notice Act as improved owner for Vault V2 instances with timelocked owner actions and guardian vetoes.
@@ -21,8 +25,6 @@ contract VaultV2Supervisor {
     error ZeroAddress();
     /// @dev Caller is not a registered guardian for the vault.
     error NotGuardian();
-    /// @dev Reserved for future use.
-    //error NoPendingRemoval();
     /// @dev Timelock has not expired yet.
     error TimelockNotExpired();
     /// @dev Caller is neither the supervisor owner nor the vault owner.
@@ -35,8 +37,6 @@ contract VaultV2Supervisor {
     error OnlyOwnerOrGuardian();
     /// @dev Calldata length is invalid.
     error InvalidAmount();
-    /// @dev Vault owner is not allowlisted to self-manage guardians.
-    //error NotAllowedVaultOwner();
     /// @dev Operation would not change state.
     error NoOp();
     /// @dev Sentinel removal attempted for the supervisor address.
@@ -44,12 +44,6 @@ contract VaultV2Supervisor {
 
     /// @notice Emitted when the supervisor owner changes.
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
-    /// @notice Emitted when a sentinel removal is scheduled.
-    //event RemoveSentinelSubmitted(address indexed vault, address indexed account, uint256 executeAfter);
-    /// @notice Emitted when a sentinel removal is revoked.
-    //event RemoveSentinelRevoked(address indexed vault, address indexed account, address indexed guardian);
-    /// @notice Emitted when a sentinel removal is executed.
-    //event RemoveSentinelAccepted(address indexed vault, address indexed account);
     /// @notice Emitted when a vault owner is allowlisted or removed.
     event AllowedVaultOwnerSet(address indexed vaultOwner, bool allowed);
     /// @notice Emitted when a timelocked action is submitted.
@@ -76,6 +70,8 @@ contract VaultV2Supervisor {
     /// @notice Execution timestamp for scheduled calldata.
     /// @dev Keyed by the exact calldata of the action.
     mapping(bytes data => uint256) public executableAt;
+    /// @notice Map listing the vaults for which a new owner is submitted but not executed, if any
+    mapping(address vault => address) public scheduledNewOwner;
     /// @notice Allowlist for vault owners that may add guardians for their vaults.
     mapping(address vaultOwner => bool) public allowedVaultOwners;
     /// @dev Per-vault guardian set.
@@ -102,7 +98,7 @@ contract VaultV2Supervisor {
 
     /// @notice Transfers supervisor ownership.
     /// @param newOwner The new owner address.
-    function setOwner(address newOwner) external onlyOwner {
+    function setSupervisorOwner(address newOwner) external onlyOwner {
         require(newOwner != address(0), ZeroAddress());
         require(newOwner != owner, NoOp());
         address previous = owner;
@@ -118,6 +114,12 @@ contract VaultV2Supervisor {
         address vault = _extractVaultAddress(data);
         bytes4 selector = _selectorFromCalldata(data);
         uint256 executeAfter = block.timestamp + timelock;
+        if(selector == this.setOwner.selector) {
+            (address v, address newO) = abi.decode(data[4:], (address, address));
+            require(v != address(0) && newO != address(0), ZeroAddress());
+            require(newO != IVaultV2(v).owner(), NoOp());
+            scheduledNewOwner[v] = newO;
+        }
         executableAt[data] = executeAfter;
         emit TimelockSubmitted(msg.sender, vault, selector, data, executeAfter);
     }
@@ -164,6 +166,14 @@ contract VaultV2Supervisor {
         vault.setSymbol(newSymbol);
     }
 
+    /// @notice Sets the skim recipient on a vault adapter (no timelock).
+    /// @param skimable The adapter to update.
+    /// @param newSkimRecipient The new skim recipient address.
+    function setSkimRecipient(address skimable, address newSkimRecipient) external onlyOwner {
+        // TODO; Add tests for this function once we have an adapter with skim functionality
+        ISkimRecipient(skimable).setSkimRecipient(newSkimRecipient);
+    }
+
     /// @notice Adds a sentinel on a vault (no timelock).
     /// @param vault The vault to update.
     /// @param account The sentinel address to add.
@@ -207,6 +217,7 @@ contract VaultV2Supervisor {
     function setOwner(IVaultV2 vault, address newOwner) external onlyOwner {
         timelocked();
         require(vault.owner() != newOwner, NoOp());
+        scheduledNewOwner[address(vault)] = address(0);
         vault.setOwner(newOwner);
     }
 
@@ -232,6 +243,7 @@ contract VaultV2Supervisor {
     /// @param vault The vault to target.
     /// @param data The vault calldata to revoke.
     function revoke(address vault, bytes memory data) external onlyGuardian(vault) {
+        // TODO set newOwner(vault) to address(0) if it was a new owner
         IRevokable(vault).revoke(data);
         emit VaultRevokeForwarded(msg.sender, vault, _selectorFromMemory(data), data);
     }
@@ -266,4 +278,19 @@ contract VaultV2Supervisor {
             selector := mload(add(data, 32))
         }
     }
+    function isOwnershipChanging(address vault) external view returns (bool) {
+        return scheduledNewOwner[vault] != address(0);
+    }
+
+    function isGuardianBeingRemoved(address vault, address guardian) external view returns (bool) {
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeGuardian.selector, vault, guardian);
+        return executableAt[data] > 0;
+    }
+
+    function isSentinelBeingRemoved(address vault, address sentinel) external view returns (bool) {
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, sentinel);
+        return executableAt[data] > 0;
+        
+    }
+
 }
