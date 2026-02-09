@@ -274,6 +274,55 @@ contract VaultV2SupervisorTest is Test {
         assertFalse(supervisor.isSupervisorOwnershipChanging());
     }
 
+    function test_SetSupervisorOwner_IsTimelocked() public {
+        vm.expectRevert(VaultV2Supervisor.DataNotTimelocked.selector);
+        supervisor.setSupervisorOwner(address(0x111));
+
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.setSupervisorOwner.selector, address(0x111));
+        supervisor.submit(data);
+
+        vm.warp(block.timestamp + TIMELOCK + 1);
+        supervisor.setSupervisorOwner(address(0x111));
+
+        assertEq(supervisor.owner(), address(0x111));
+        assertEq(supervisor.scheduledSupervisorOwner(), address(0));
+        assertFalse(supervisor.isSupervisorOwnershipChanging());
+    }
+
+    function test_GuardianCannotRevokeSupervisorOwnerChange() public {
+        supervisor.addGuardian(address(vault), GUARDIAN);
+
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.setSupervisorOwner.selector, address(0x111));
+        supervisor.submit(data);
+
+        vm.prank(GUARDIAN);
+        vm.expectRevert(VaultV2Supervisor.OnlyOwnerOrGuardian.selector);
+        supervisor.revoke(data);
+    }
+
+    function test_AddGuardian_RevertsOnNoOpOrZeroAddress() public {
+        supervisor.addGuardian(address(vault), GUARDIAN);
+
+        vm.expectRevert(VaultV2Supervisor.NoOp.selector);
+        supervisor.addGuardian(address(vault), GUARDIAN);
+
+        vm.expectRevert(VaultV2Supervisor.ZeroAddress.selector);
+        supervisor.addGuardian(address(0), GUARDIAN);
+
+        vm.expectRevert(VaultV2Supervisor.ZeroAddress.selector);
+        supervisor.addGuardian(address(vault), address(0));
+    }
+
+    function test_RemoveGuardian_RevertsWhenGuardianNotRegistered() public {
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeGuardian.selector, vault, GUARDIAN);
+        supervisor.submit(data);
+
+        vm.warp(block.timestamp + TIMELOCK + 1);
+
+        vm.expectRevert(VaultV2Supervisor.NoOp.selector);
+        supervisor.removeGuardian(vault, GUARDIAN);
+    }
+
     function test_IsVaultSupervised() public view {
         assertTrue(supervisor.isVaultSupervised(address(vault)));
         assertFalse(supervisor.isVaultSupervised(address(box)));
