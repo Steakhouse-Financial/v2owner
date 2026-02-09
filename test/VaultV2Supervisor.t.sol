@@ -116,6 +116,58 @@ contract VaultV2SupervisorTest is Test {
         supervisor.addGuardian(address(disallowedVault), GUARDIAN);
     }
 
+    function test_GetVaults_AndOwnedBuckets() public {
+        supervisor.addGuardian(address(vault), GUARDIAN);
+        supervisor.addGuardian(address(box), address(0xABCD));
+
+        address[] memory vaults = supervisor.getVaults();
+        assertEq(vaults.length, 2);
+        assertTrue(_contains(vaults, address(vault)));
+        assertTrue(_contains(vaults, address(box)));
+
+        address[] memory ownedVaults = supervisor.getOwnedVaults();
+        assertEq(ownedVaults.length, 1);
+        assertEq(ownedVaults[0], address(vault));
+
+        address[] memory nonOwnedVaults = supervisor.getNonOwnedVaults();
+        assertEq(nonOwnedVaults.length, 1);
+        assertEq(nonOwnedVaults[0], address(box));
+    }
+
+    function test_RemoveGuardian_RemovesVaultFromTrackedSetWhenEmpty() public {
+        supervisor.addGuardian(address(vault), GUARDIAN);
+
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeGuardian.selector, vault, GUARDIAN);
+        supervisor.submit(data);
+
+        vm.warp(block.timestamp + TIMELOCK + 1);
+        supervisor.removeGuardian(vault, GUARDIAN);
+
+        assertEq(supervisor.getGuardians(address(vault)).length, 0);
+        assertEq(supervisor.getVaults().length, 0);
+    }
+
+    function test_RemoveGuardian_KeepsVaultTrackedWhenGuardiansRemain() public {
+        address guardian2 = address(0xBEE2);
+
+        supervisor.addGuardian(address(vault), GUARDIAN);
+        supervisor.addGuardian(address(vault), guardian2);
+
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeGuardian.selector, vault, GUARDIAN);
+        supervisor.submit(data);
+
+        vm.warp(block.timestamp + TIMELOCK + 1);
+        supervisor.removeGuardian(vault, GUARDIAN);
+
+        address[] memory guardians = supervisor.getGuardians(address(vault));
+        assertEq(guardians.length, 1);
+        assertEq(guardians[0], guardian2);
+
+        address[] memory vaults = supervisor.getVaults();
+        assertEq(vaults.length, 1);
+        assertEq(vaults[0], address(vault));
+    }
+
     function test_Timelocked_RemoveSentinel_Flow() public {
         supervisor.addSentinel(vault, SENTINEL);
         assertTrue(vault.isSentinel(SENTINEL));
@@ -226,5 +278,12 @@ contract VaultV2SupervisorTest is Test {
         assertTrue(supervisor.isVaultSupervised(address(vault)));
         assertFalse(supervisor.isVaultSupervised(address(box)));
         assertFalse(supervisor.isVaultSupervised(address(0xB0B)));
+    }
+
+    function _contains(address[] memory list, address account) internal pure returns (bool) {
+        for (uint256 i; i < list.length; ++i) {
+            if (list[i] == account) return true;
+        }
+        return false;
     }
 }

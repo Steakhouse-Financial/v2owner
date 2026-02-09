@@ -78,6 +78,8 @@ contract VaultV2Supervisor {
     address public scheduledSupervisorOwner;
     /// @notice Allowlist for vault owners that may add guardians for their vaults.
     mapping(address vaultOwner => bool) public allowedVaultOwners;
+    /// @dev Set of vaults with at least one registered guardian.
+    EnumerableSet.AddressSet private _vaults;
     /// @dev Per-vault guardian set.
     mapping(address vault => EnumerableSet.AddressSet) private _guardians;
 
@@ -233,7 +235,51 @@ contract VaultV2Supervisor {
             OnlyOwnerOrVaultOwner()
         );
         _guardians[vault].add(guardian);
+        _vaults.add(vault);
         emit GuardianAdded(vault, guardian, msg.sender);
+    }
+
+    /// @notice Returns vaults with at least one registered guardian.
+    function getVaults() external view returns (address[] memory) {
+        return _vaults.values();
+    }
+
+    /// @notice Returns tracked vaults currently owned by this supervisor.
+    function getOwnedVaults() external view returns (address[] memory ownedVaults) {
+        uint256 length = _vaults.length();
+        ownedVaults = new address[](length);
+        uint256 count;
+
+        for (uint256 i; i < length; ++i) {
+            address vault = _vaults.at(i);
+            if (_ownerOf(vault) == address(this)) {
+                ownedVaults[count] = vault;
+                ++count;
+            }
+        }
+
+        assembly {
+            mstore(ownedVaults, count)
+        }
+    }
+
+    /// @notice Returns tracked vaults not currently owned by this supervisor.
+    function getNonOwnedVaults() external view returns (address[] memory nonOwnedVaults) {
+        uint256 length = _vaults.length();
+        nonOwnedVaults = new address[](length);
+        uint256 count;
+
+        for (uint256 i; i < length; ++i) {
+            address vault = _vaults.at(i);
+            if (_ownerOf(vault) != address(this)) {
+                nonOwnedVaults[count] = vault;
+                ++count;
+            }
+        }
+
+        assembly {
+            mstore(nonOwnedVaults, count)
+        }
     }
 
     /// @notice Returns the guardians registered for a vault.
@@ -266,8 +312,13 @@ contract VaultV2Supervisor {
     /// @param guardian The guardian address to remove.
     function removeGuardian(IVaultV2 vault, address guardian) external onlyOwner {
         timelocked();
-        _guardians[address(vault)].remove(guardian);
-        emit GuardianRemoved(address(vault), guardian, msg.sender);
+        address vaultAddress = address(vault);
+        if (_guardians[vaultAddress].remove(guardian)) {
+            if (_guardians[vaultAddress].length() == 0) {
+                _vaults.remove(vaultAddress);
+            }
+            emit GuardianRemoved(vaultAddress, guardian, msg.sender);
+        }
     }
 
     /// @notice Forwards a revoke to the vault's timelock.
@@ -302,6 +353,13 @@ contract VaultV2Supervisor {
         }
     }
 
+    function _ownerOf(address vault) internal view returns (address owner_) {
+        (bool success, bytes memory returnData) =
+            vault.staticcall(abi.encodeWithSelector(IVaultV2.owner.selector));
+        if (!success || returnData.length < 32) return address(0);
+        owner_ = abi.decode(returnData, (address));
+    }
+
     /// @notice Returns whether a vault ownership transfer is currently scheduled.
     /// @param vault The vault to query.
     function isOwnershipChanging(address vault) external view returns (bool) {
@@ -332,9 +390,6 @@ contract VaultV2Supervisor {
     /// @notice Returns whether a vault-like contract is currently supervised by this contract.
     /// @param vault The vault address to query.
     function isVaultSupervised(address vault) external view returns (bool) {
-        (bool success, bytes memory returnData) =
-            vault.staticcall(abi.encodeWithSelector(IVaultV2.owner.selector));
-        if (!success || returnData.length < 32) return false;
-        return abi.decode(returnData, (address)) == address(this);
+        return _ownerOf(vault) == address(this);
     }
 }
