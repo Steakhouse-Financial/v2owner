@@ -7,6 +7,8 @@ import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol"
 import { VaultV2Supervisor } from "src/VaultV2Supervisor.sol";
 import { IVaultV2 } from "vault-v2/src/interfaces/IVaultV2.sol";
 import { VaultV2Factory } from "vault-v2/src/VaultV2Factory.sol";
+import { MorphoVaultV1AdapterFactory } from "vault-v2/src/adapters/MorphoVaultV1AdapterFactory.sol";
+import { IMorphoVaultV1Adapter } from "vault-v2/src/adapters/interfaces/IMorphoVaultV1Adapter.sol";
 
 import { IBox } from "box/src/interfaces/IBox.sol";
 import { BoxFactory } from "box/src/factories/BoxFactory.sol";
@@ -16,11 +18,14 @@ import { TestAsset } from "test/helpers/TestAsset.sol";
 contract VaultV2SupervisorTest is Test {
     VaultV2Supervisor supervisor;
     VaultV2Factory vaultFactory;
+    MorphoVaultV1AdapterFactory adapterFactory;
     BoxFactory boxFactory;
 
     TestAsset asset;
     IVaultV2 vault;
+    IVaultV2 morphoVaultLike;
     IBox box;
+    IMorphoVaultV1Adapter mv1Adapter;
 
     address OWNER = address(this);
     address CURATOR = address(0xC0FFEE);
@@ -30,10 +35,15 @@ contract VaultV2SupervisorTest is Test {
     function setUp() public {
         supervisor = new VaultV2Supervisor();
         vaultFactory = new VaultV2Factory();
+        adapterFactory = new MorphoVaultV1AdapterFactory();
         boxFactory = new BoxFactory();
         asset = new TestAsset("Test Asset", "TAST");
 
         vault = IVaultV2(vaultFactory.createVaultV2(OWNER, address(asset), keccak256("vault-main")));
+        morphoVaultLike = IVaultV2(vaultFactory.createVaultV2(OWNER, address(asset), keccak256("vault-mv1-like")));
+        mv1Adapter = IMorphoVaultV1Adapter(
+            adapterFactory.createMorphoVaultV1Adapter(address(vault), address(morphoVaultLike))
+        );
         box = boxFactory.createBox(
             IERC20(address(asset)),
             OWNER,
@@ -65,6 +75,20 @@ contract VaultV2SupervisorTest is Test {
 
         supervisor.setSymbol(vault, "TVLT");
         assertEq(vault.symbol(), "TVLT");
+    }
+
+    function test_SetSkimRecipient_ForwardsToTarget() public {
+        address recipient = address(0xD00D);
+
+        supervisor.setSkimRecipient(address(mv1Adapter), recipient);
+
+        assertEq(mv1Adapter.skimRecipient(), recipient);
+    }
+
+    function test_SetSkimRecipient_RevertsForNonSupervisorOwner() public {
+        vm.prank(address(0xBAD));
+        vm.expectRevert(VaultV2Supervisor.NotOwner.selector);
+        supervisor.setSkimRecipient(address(mv1Adapter), address(0xD00D));
     }
 
     function test_AddGuardian_byOwner_and_VaultOwner() public {

@@ -175,7 +175,6 @@ contract VaultV2Supervisor {
     /// @param skimable The adapter to update.
     /// @param newSkimRecipient The new skim recipient address.
     function setSkimRecipient(address skimable, address newSkimRecipient) external onlyOwner {
-        // TODO; Add tests for this function once we have an adapter with skim functionality
         ISkimRecipient(skimable).setSkimRecipient(newSkimRecipient);
     }
 
