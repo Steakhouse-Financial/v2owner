@@ -76,8 +76,6 @@ contract VaultV2Supervisor {
     mapping(bytes data => uint256) public executableAt;
     /// @notice Map listing the vaults for which a new owner is submitted but not executed, if any
     mapping(address vault => address) public scheduledNewOwner;
-    /// @notice New supervisor owner submitted but not executed, if any.
-    address public scheduledSupervisorOwner;
     /// @notice Allowlist for vault owners that may add guardians for their vaults.
     mapping(address vaultOwner => bool) public allowedVaultOwners;
     /// @dev Set of vaults with at least one registered guardian.
@@ -109,12 +107,8 @@ contract VaultV2Supervisor {
     /// @notice Transfers supervisor ownership.
     /// @param newOwner The new owner address.
     function setSupervisorOwner(address newOwner) external onlyOwner {
-        timelocked();
-
         require(newOwner != address(0), ZeroAddress());
         require(newOwner != owner, NoOp());
-
-        scheduledSupervisorOwner = address(0);
 
         address previous = owner;
         owner = newOwner;
@@ -137,12 +131,6 @@ contract VaultV2Supervisor {
             require(newO != IVaultV2(v).owner(), NoOp());
             require(scheduledNewOwner[v] == address(0), OwnershipChangeAlreadyScheduled());
             scheduledNewOwner[v] = newO;
-        } else if (selector == this.setSupervisorOwner.selector) {
-            address newO = abi.decode(data[4:], (address));
-            require(newO != address(0), ZeroAddress());
-            require(newO != owner, NoOp());
-            require(scheduledSupervisorOwner == address(0), OwnershipChangeAlreadyScheduled());
-            scheduledSupervisorOwner = newO;
         }
 
         executableAt[data] = executeAfter;
@@ -161,8 +149,6 @@ contract VaultV2Supervisor {
         if (selector == this.setOwner.selector) {
             (address targetVault,) = abi.decode(data[4:], (address, address));
             scheduledNewOwner[targetVault] = address(0);
-        } else if (selector == this.setSupervisorOwner.selector) {
-            scheduledSupervisorOwner = address(0);
         }
 
         executableAt[data] = 0;
@@ -377,11 +363,6 @@ contract VaultV2Supervisor {
     /// @param vault The vault to query.
     function isOwnershipChanging(address vault) external view returns (bool) {
         return scheduledNewOwner[vault] != address(0);
-    }
-
-    /// @notice Returns whether supervisor ownership transfer is currently scheduled.
-    function isSupervisorOwnershipChanging() external view returns (bool) {
-        return scheduledSupervisorOwner != address(0);
     }
 
     /// @notice Returns whether guardian removal is currently scheduled.

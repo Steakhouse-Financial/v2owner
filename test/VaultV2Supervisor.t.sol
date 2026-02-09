@@ -256,48 +256,15 @@ contract VaultV2SupervisorTest is Test {
         assertEq(supervisor.scheduledNewOwner(address(vault)), address(0));
     }
 
-    function test_SubmitAndRevoke_SetSupervisorOwnerScheduling() public {
-        bytes memory first = abi.encodeWithSelector(VaultV2Supervisor.setSupervisorOwner.selector, address(0x111));
-        bytes memory second = abi.encodeWithSelector(VaultV2Supervisor.setSupervisorOwner.selector, address(0x222));
-
-        assertFalse(supervisor.isSupervisorOwnershipChanging());
-
-        supervisor.submit(first);
-        assertEq(supervisor.scheduledSupervisorOwner(), address(0x111));
-        assertTrue(supervisor.isSupervisorOwnershipChanging());
-
-        vm.expectRevert(VaultV2Supervisor.OwnershipChangeAlreadyScheduled.selector);
-        supervisor.submit(second);
-
-        supervisor.revoke(first);
-        assertEq(supervisor.scheduledSupervisorOwner(), address(0));
-        assertFalse(supervisor.isSupervisorOwnershipChanging());
-    }
-
-    function test_SetSupervisorOwner_IsTimelocked() public {
-        vm.expectRevert(VaultV2Supervisor.DataNotTimelocked.selector);
+    function test_SetSupervisorOwner_IsImmediate() public {
         supervisor.setSupervisorOwner(address(0x111));
-
-        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.setSupervisorOwner.selector, address(0x111));
-        supervisor.submit(data);
-
-        vm.warp(block.timestamp + TIMELOCK + 1);
-        supervisor.setSupervisorOwner(address(0x111));
-
         assertEq(supervisor.owner(), address(0x111));
-        assertEq(supervisor.scheduledSupervisorOwner(), address(0));
-        assertFalse(supervisor.isSupervisorOwnershipChanging());
     }
 
-    function test_GuardianCannotRevokeSupervisorOwnerChange() public {
-        supervisor.addGuardian(address(vault), GUARDIAN);
-
-        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.setSupervisorOwner.selector, address(0x111));
-        supervisor.submit(data);
-
-        vm.prank(GUARDIAN);
-        vm.expectRevert(VaultV2Supervisor.OnlyOwnerOrGuardian.selector);
-        supervisor.revoke(data);
+    function test_SetSupervisorOwner_RevertsForNonOwner() public {
+        vm.prank(address(0xBAD));
+        vm.expectRevert(VaultV2Supervisor.NotOwner.selector);
+        supervisor.setSupervisorOwner(address(0x111));
     }
 
     function test_AddGuardian_RevertsOnNoOpOrZeroAddress() public {
