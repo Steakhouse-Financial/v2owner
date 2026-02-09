@@ -247,25 +247,20 @@ contract VaultV2Supervisor {
     /// @dev Returns tracked vaults filtered by ownership status.
     function _filterVaultsByOwnership(bool ownedBySupervisor) internal view returns (address[] memory vaults_) {
         uint256 length = _vaults.length();
+        vaults_ = new address[](length);
         uint256 count;
 
         for (uint256 i; i < length; ++i) {
             address vault = _vaults.at(i);
             bool isOwned = _ownerOf(vault) == address(this);
-            if (isOwned == ownedBySupervisor) ++count;
+            if (isOwned == ownedBySupervisor) {
+                vaults_[count] = vault;
+                ++count;
+            }
         }
 
-        vaults_ = new address[](count);
-        if (count == 0) return vaults_;
-
-        uint256 index;
-        for (uint256 i; i < length; ++i) {
-            address vault = _vaults.at(i);
-            bool isOwned = _ownerOf(vault) == address(this);
-            if (isOwned == ownedBySupervisor) {
-                vaults_[index] = vault;
-                ++index;
-            }
+        assembly {
+            mstore(vaults_, count)
         }
     }
 
