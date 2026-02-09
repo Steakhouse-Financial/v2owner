@@ -16,6 +16,8 @@ import { BoxFactory } from "box/src/factories/BoxFactory.sol";
 import { TestAsset } from "test/helpers/TestAsset.sol";
 
 contract VaultV2SupervisorTest is Test {
+    uint256 constant TIMELOCK = 14 days;
+
     VaultV2Supervisor supervisor;
     VaultV2Factory vaultFactory;
     MorphoVaultV1AdapterFactory adapterFactory;
@@ -33,7 +35,7 @@ contract VaultV2SupervisorTest is Test {
     address SENTINEL = address(0xCAFE);
 
     function setUp() public {
-        supervisor = new VaultV2Supervisor();
+        supervisor = new VaultV2Supervisor(TIMELOCK);
         vaultFactory = new VaultV2Factory();
         adapterFactory = new MorphoVaultV1AdapterFactory();
         boxFactory = new BoxFactory();
@@ -124,7 +126,7 @@ contract VaultV2SupervisorTest is Test {
         vm.expectRevert(VaultV2Supervisor.TimelockNotExpired.selector);
         supervisor.removeSentinel(vault, SENTINEL);
 
-        vm.warp(block.timestamp + 14 days + 1);
+        vm.warp(block.timestamp + TIMELOCK + 1);
         supervisor.removeSentinel(vault, SENTINEL);
         assertFalse(vault.isSentinel(SENTINEL));
     }
@@ -171,12 +173,58 @@ contract VaultV2SupervisorTest is Test {
         address newOwner = address(0x999);
         bytes memory data = abi.encodeWithSignature("setOwner(address,address)", address(vault), newOwner);
         supervisor.submit(data);
+        assertEq(supervisor.scheduledNewOwner(address(vault)), newOwner);
 
         vm.expectRevert(VaultV2Supervisor.TimelockNotExpired.selector);
         supervisor.setOwner(vault, newOwner);
 
-        vm.warp(block.timestamp + 14 days + 1);
+        vm.warp(block.timestamp + TIMELOCK + 1);
         supervisor.setOwner(vault, newOwner);
         assertEq(vault.owner(), newOwner);
+        assertEq(supervisor.scheduledNewOwner(address(vault)), address(0));
+    }
+
+    function test_Submit_SetOwner_RevertsIfOwnershipAlreadyScheduled() public {
+        bytes memory first = abi.encodeWithSignature("setOwner(address,address)", address(vault), address(0x111));
+        bytes memory second = abi.encodeWithSignature("setOwner(address,address)", address(vault), address(0x222));
+
+        supervisor.submit(first);
+
+        vm.expectRevert(VaultV2Supervisor.OwnershipChangeAlreadyScheduled.selector);
+        supervisor.submit(second);
+    }
+
+    function test_Revoke_ClearsScheduledVaultOwner() public {
+        bytes memory data = abi.encodeWithSignature("setOwner(address,address)", address(vault), address(0x999));
+
+        supervisor.submit(data);
+        assertEq(supervisor.scheduledNewOwner(address(vault)), address(0x999));
+
+        supervisor.revoke(data);
+        assertEq(supervisor.scheduledNewOwner(address(vault)), address(0));
+    }
+
+    function test_SubmitAndRevoke_SetSupervisorOwnerScheduling() public {
+        bytes memory first = abi.encodeWithSelector(VaultV2Supervisor.setSupervisorOwner.selector, address(0x111));
+        bytes memory second = abi.encodeWithSelector(VaultV2Supervisor.setSupervisorOwner.selector, address(0x222));
+
+        assertFalse(supervisor.isSupervisorOwnershipChanging());
+
+        supervisor.submit(first);
+        assertEq(supervisor.scheduledSupervisorOwner(), address(0x111));
+        assertTrue(supervisor.isSupervisorOwnershipChanging());
+
+        vm.expectRevert(VaultV2Supervisor.OwnershipChangeAlreadyScheduled.selector);
+        supervisor.submit(second);
+
+        supervisor.revoke(first);
+        assertEq(supervisor.scheduledSupervisorOwner(), address(0));
+        assertFalse(supervisor.isSupervisorOwnershipChanging());
+    }
+
+    function test_IsVaultSupervised() public view {
+        assertTrue(supervisor.isVaultSupervised(address(vault)));
+        assertFalse(supervisor.isVaultSupervised(address(box)));
+        assertFalse(supervisor.isVaultSupervised(address(0xB0B)));
     }
 }

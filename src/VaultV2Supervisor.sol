@@ -37,6 +37,8 @@ contract VaultV2Supervisor {
     error OnlyOwnerOrGuardian();
     /// @dev Calldata length is invalid.
     error InvalidAmount();
+    /// @dev An ownership change is already scheduled.
+    error OwnershipChangeAlreadyScheduled();
     /// @dev Operation would not change state.
     error NoOp();
     /// @dev Sentinel removal attempted for the supervisor address.
@@ -72,6 +74,8 @@ contract VaultV2Supervisor {
     mapping(bytes data => uint256) public executableAt;
     /// @notice Map listing the vaults for which a new owner is submitted but not executed, if any
     mapping(address vault => address) public scheduledNewOwner;
+    /// @notice New supervisor owner submitted but not executed, if any.
+    address public scheduledSupervisorOwner;
     /// @notice Allowlist for vault owners that may add guardians for their vaults.
     mapping(address vaultOwner => bool) public allowedVaultOwners;
     /// @dev Per-vault guardian set.
@@ -89,11 +93,12 @@ contract VaultV2Supervisor {
         _;
     }
 
-    /// @notice Initializes the supervisor with msg.sender as owner and a 14 day timelock.
-    constructor() {
+    /// @notice Initializes the supervisor owner and timelock.
+    /// @param timelock_ Timelock duration for sensitive actions, in seconds.
+    constructor(uint256 timelock_) {
         owner = msg.sender;
         emit OwnershipTransferred(address(0), msg.sender);
-        timelock = 14 days;
+        timelock = timelock_;
     }
 
     /// @notice Transfers supervisor ownership.
@@ -101,6 +106,9 @@ contract VaultV2Supervisor {
     function setSupervisorOwner(address newOwner) external onlyOwner {
         require(newOwner != address(0), ZeroAddress());
         require(newOwner != owner, NoOp());
+
+        scheduledSupervisorOwner = address(0);
+
         address previous = owner;
         owner = newOwner;
         emit OwnershipTransferred(previous, newOwner);
@@ -120,7 +128,14 @@ contract VaultV2Supervisor {
             (address v, address newO) = abi.decode(data[4:], (address, address));
             require(v != address(0) && newO != address(0), ZeroAddress());
             require(newO != IVaultV2(v).owner(), NoOp());
+            require(scheduledNewOwner[v] == address(0), OwnershipChangeAlreadyScheduled());
             scheduledNewOwner[v] = newO;
+        } else if (selector == this.setSupervisorOwner.selector) {
+            address newO = abi.decode(data[4:], (address));
+            require(newO != address(0), ZeroAddress());
+            require(newO != owner, NoOp());
+            require(scheduledSupervisorOwner == address(0), OwnershipChangeAlreadyScheduled());
+            scheduledSupervisorOwner = newO;
         }
 
         executableAt[data] = executeAfter;
@@ -131,12 +146,20 @@ contract VaultV2Supervisor {
     /// @param data Full calldata that was previously submitted.
     function revoke(bytes calldata data) external {
         address vault = _extractVaultAddress(data);
+        bytes4 selector = _selector(data);
 
         require(_guardians[vault].contains(msg.sender) || msg.sender == owner, OnlyOwnerOrGuardian());
         require(executableAt[data] != 0, DataNotTimelocked());
 
+        if (selector == this.setOwner.selector) {
+            (address targetVault,) = abi.decode(data[4:], (address, address));
+            scheduledNewOwner[targetVault] = address(0);
+        } else if (selector == this.setSupervisorOwner.selector) {
+            scheduledSupervisorOwner = address(0);
+        }
+
         executableAt[data] = 0;
-        emit TimelockRevoked(msg.sender, vault, _selector(data), data);
+        emit TimelockRevoked(msg.sender, vault, selector, data);
     }
 
     /// @dev Validates and consumes the timelock for the current calldata.
@@ -191,7 +214,11 @@ contract VaultV2Supervisor {
     function setAllowedVaultOwner(address vaultOwner, bool allowed) external onlyOwner {
         require(vaultOwner != address(0), ZeroAddress());
         require(allowedVaultOwners[vaultOwner] != allowed, NoOp());
-        allowedVaultOwners[vaultOwner] = allowed;
+        if (allowed) {
+            allowedVaultOwners[vaultOwner] = allowed;
+        } else {
+            delete allowedVaultOwners[vaultOwner];
+        }
         emit AllowedVaultOwnerSet(vaultOwner, allowed);
     }
 
@@ -281,6 +308,11 @@ contract VaultV2Supervisor {
         return scheduledNewOwner[vault] != address(0);
     }
 
+    /// @notice Returns whether supervisor ownership transfer is currently scheduled.
+    function isSupervisorOwnershipChanging() external view returns (bool) {
+        return scheduledSupervisorOwner != address(0);
+    }
+
     /// @notice Returns whether guardian removal is currently scheduled.
     /// @param vault The vault to query.
     /// @param guardian The guardian to query.
@@ -297,4 +329,12 @@ contract VaultV2Supervisor {
         return executableAt[data] > 0;
     }
 
+    /// @notice Returns whether a vault-like contract is currently supervised by this contract.
+    /// @param vault The vault address to query.
+    function isVaultSupervised(address vault) external view returns (bool) {
+        (bool success, bytes memory returnData) =
+            vault.staticcall(abi.encodeWithSelector(IVaultV2.owner.selector));
+        if (!success || returnData.length < 32) return false;
+        return abi.decode(returnData, (address)) == address(this);
+    }
 }
