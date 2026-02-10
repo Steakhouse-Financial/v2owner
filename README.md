@@ -7,7 +7,7 @@ VaultV2Supervisor is an ownership and safety module designed to operate as the p
 - **Generic timelock system** for sensitive operations with guardian revocation capabilities
 - **Vault tracking and filtering** to monitor supervised and non-supervised vaults
 - **Pass-through functions** for immediate vault operations (curator, name, symbol, sentinels)
-- **Guardian proxy functionality** to act as a multi-guardian for Box contracts
+- **Guardian proxy functionality** to act as a multi-guardian for compatible `revoke(bytes)` contracts
 
 The contract is at [src/VaultV2Supervisor.sol](src/VaultV2Supervisor.sol).
 
@@ -15,7 +15,7 @@ The contract is at [src/VaultV2Supervisor.sol](src/VaultV2Supervisor.sol).
 
 `VaultV2Supervisor` is designed to own one or more Vault V2 (`IVaultV2`) contracts and add governance controls to sensitive operations. Rather than calling vault functions directly, operators interact with the vault through the supervisor, which enforces delays and guardian oversight for critical actions.
 
-The supervisor can also serve as a guardian for Box contracts, enabling multi-guardian setups where any registered guardian can revoke pending Box operations.
+The supervisor can also serve as a guardian proxy for compatible `revoke(bytes)` contracts, enabling multi-guardian setups where any registered guardian can revoke pending operations.
 
 ### Roles
 
