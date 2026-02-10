@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.28;
 
 import { IVaultV2 } from "vault-v2/src/interfaces/IVaultV2.sol";
 import { EnumerableSet } from "openzeppelin-contracts/contracts/utils/structs/EnumerableSet.sol";
@@ -163,8 +163,41 @@ contract VaultV2Supervisor {
         require(executableAt[data] != 0, DataNotTimelocked());
 
         if (selector == this.setOwner.selector) {
-            (address targetVault,) = abi.decode(data[4:], (address, address));
-            scheduledNewOwner[targetVault] = address(0);
+            scheduledNewOwner[vault] = address(0);
+        }
+
+        executableAt[data] = 0;
+        emit TimelockRevoked(msg.sender, vault, selector, data);
+    }
+
+    /// @notice Cancels a pending guardian removal timelock.
+    /// @param vault The vault whose guardian removal was submitted.
+    /// @param guardian The guardian address being removed.
+    function revokeGuardianRemoval(IVaultV2 vault, address guardian) external {
+        address vaultAddress = address(vault);
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeGuardian.selector, vault, guardian);
+        _revokeKnownVault(data, vaultAddress, VaultV2Supervisor.removeGuardian.selector);
+    }
+
+    /// @notice Cancels a pending vault ownership transfer timelock.
+    /// @param vault The vault whose ownership transfer was submitted.
+    function revokeVaultOwnerChange(IVaultV2 vault) external {
+        address vaultAddress = address(vault);
+        bytes memory data = abi.encodeWithSelector(
+            VaultV2Supervisor.setOwner.selector,
+            vault,
+            scheduledNewOwner[vaultAddress]
+        );
+        _revokeKnownVault(data, vaultAddress, VaultV2Supervisor.setOwner.selector);
+    }
+
+    /// @dev Internal revoke routine when the vault and selector are known.
+    function _revokeKnownVault(bytes memory data, address vault, bytes4 selector) internal {
+        require(_guardians[vault].contains(msg.sender) || msg.sender == owner, OnlyOwnerOrGuardian());
+        require(executableAt[data] != 0, DataNotTimelocked());
+
+        if (selector == this.setOwner.selector) {
+            scheduledNewOwner[vault] = address(0);
         }
 
         executableAt[data] = 0;

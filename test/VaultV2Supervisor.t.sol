@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
 
 import { VaultV2Supervisor } from "src/VaultV2Supervisor.sol";
 import { IVaultV2 } from "vault-v2/src/interfaces/IVaultV2.sol";
-import { IVaultV2Factory } from "vault-v2/src/interfaces/IVaultV2Factory.sol";
+import { VaultV2Factory } from "vault-v2/src/VaultV2Factory.sol";
 import { IMorphoVaultV1Adapter } from "vault-v2/src/adapters/interfaces/IMorphoVaultV1Adapter.sol";
-import { IMorphoVaultV1AdapterFactory } from "vault-v2/src/adapters/interfaces/IMorphoVaultV1AdapterFactory.sol";
+import { MorphoVaultV1AdapterFactory } from "vault-v2/src/adapters/MorphoVaultV1AdapterFactory.sol";
 
 import { TestAsset } from "test/helpers/TestAsset.sol";
 
@@ -15,8 +15,8 @@ contract VaultV2SupervisorTest is Test {
     uint256 constant TIMELOCK = 14 days;
 
     VaultV2Supervisor supervisor;
-    IVaultV2Factory vaultFactory;
-    IMorphoVaultV1AdapterFactory adapterFactory;
+    VaultV2Factory vaultFactory;
+    MorphoVaultV1AdapterFactory adapterFactory;
 
     TestAsset asset;
     IVaultV2 vault;
@@ -31,10 +31,8 @@ contract VaultV2SupervisorTest is Test {
 
     function setUp() public {
         supervisor = new VaultV2Supervisor(TIMELOCK);
-        vaultFactory = IVaultV2Factory(deployCode("vault-v2/src/VaultV2Factory.sol:VaultV2Factory"));
-        adapterFactory = IMorphoVaultV1AdapterFactory(
-            deployCode("vault-v2/src/adapters/MorphoVaultV1AdapterFactory.sol:MorphoVaultV1AdapterFactory")
-        );
+        vaultFactory = new VaultV2Factory();
+        adapterFactory = new MorphoVaultV1AdapterFactory();
         asset = new TestAsset("Test Asset", "TAST");
 
         vault = IVaultV2(vaultFactory.createVaultV2(OWNER, address(asset), keccak256("vault-main")));
@@ -206,14 +204,14 @@ contract VaultV2SupervisorTest is Test {
         supervisor.removeSentinel(vault, SENTINEL);
     }
 
-    function test_RevokeByGuardian_CancelsSupervisorTimelock() public {
+    function test_RevokeGuardianRemoval_CancelsSupervisorTimelock() public {
         supervisor.addGuardian(address(vault), GUARDIAN);
 
         bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeGuardian.selector, vault, GUARDIAN);
         supervisor.submit(data);
 
         vm.prank(GUARDIAN);
-        supervisor.revoke(data);
+        supervisor.revokeGuardianRemoval(vault, GUARDIAN);
 
         vm.expectRevert(VaultV2Supervisor.DataNotTimelocked.selector);
         supervisor.removeGuardian(vault, GUARDIAN);
@@ -312,14 +310,19 @@ contract VaultV2SupervisorTest is Test {
         supervisor.submit(second);
     }
 
-    function test_Revoke_ClearsScheduledVaultOwner() public {
+    function test_RevokeVaultOwnerChange_ClearsScheduledVaultOwner() public {
         bytes memory data = abi.encodeWithSignature("setOwner(address,address)", address(vault), address(0x999));
 
         supervisor.submit(data);
         assertEq(supervisor.scheduledNewOwner(address(vault)), address(0x999));
 
-        supervisor.revoke(data);
+        supervisor.revokeVaultOwnerChange(vault);
         assertEq(supervisor.scheduledNewOwner(address(vault)), address(0));
+    }
+
+    function test_RevokeVaultOwnerChange_RevertsWhenNotPending() public {
+        vm.expectRevert(VaultV2Supervisor.DataNotTimelocked.selector);
+        supervisor.revokeVaultOwnerChange(vault);
     }
 
     function test_TransferSupervisorOwnership_StartsTransfer() public {
