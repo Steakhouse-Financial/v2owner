@@ -416,14 +416,6 @@ contract VaultV2Supervisor {
         return executableAt[data] > 0;
     }
 
-    /// @notice Returns whether sentinel removal is currently scheduled.
-    /// @param vault The vault to query.
-    /// @param sentinel The sentinel to query.
-    function isSentinelBeingRemoved(address vault, address sentinel) external view returns (bool) {
-        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, sentinel);
-        return executableAt[data] > 0;
-    }
-
     /// @notice Returns whether a vault-like contract is currently supervised by this contract.
     /// @param vault The vault address to query.
     function isVaultSupervised(address vault) external view returns (bool) {

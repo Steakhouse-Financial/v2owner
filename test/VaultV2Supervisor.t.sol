@@ -422,16 +422,6 @@ contract VaultV2SupervisorTest is Test {
         assertFalse(supervisor.isGuardianBeingRemoved(address(vault), GUARDIAN));
     }
 
-    function test_IsSentinelBeingRemoved_View() public {
-        supervisor.addSentinel(vault, SENTINEL);
-
-        assertFalse(supervisor.isSentinelBeingRemoved(address(vault), SENTINEL));
-
-        supervisor.removeSentinel(vault, SENTINEL);
-
-        assertFalse(supervisor.isSentinelBeingRemoved(address(vault), SENTINEL));
-    }
-
     function test_IsVaultSupervised() public view {
         assertTrue(supervisor.isVaultSupervised(address(vault)));
         assertFalse(supervisor.isVaultSupervised(address(nonOwnedVault)));
