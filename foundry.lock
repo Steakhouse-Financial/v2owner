@@ -1,8 +1,20 @@
 {
+  "lib/box": {
+    "rev": "52ab8b9f20184c5882448df7be31701df1cf6f39"
+  },
   "lib/forge-std": {
     "tag": {
       "name": "v1.14.0",
       "rev": "1801b0541f4fda118a10798fd3486bb7051c5dd6"
     }
+  },
+  "lib/openzeppelin-contracts": {
+    "tag": {
+      "name": "v5.0.2",
+      "rev": "dbb6104ce834628e473d2173bbc9d47f81a9eec3"
+    }
+  },
+  "lib/vault-v2": {
+    "rev": "00881eb5f5c8031252c7fcdb7cd7e026bb21cfa4"
   }
 }

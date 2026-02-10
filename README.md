@@ -1,56 +1,105 @@
 # VaultV2Supervisor
 
-VaultV2Supervisor is an ownership and safety module intended to operate as the privileged controller for one or more Vault V2 instances. It provides:
+VaultV2Supervisor is an ownership and safety module designed to operate as the privileged controller for one or more Vault V2 instances. It provides:
 
-- A standard owner role with two-step ownership transfer.
-- A guardian role that can revoke sensitive actions before they execute during the timelock.
-- A timelocked flow for removing sentinels on the vault, so removals cannot be executed immediately and can be revoked by a guardian while pending.
-- Pass-through to call selected `IVaultV2` owner functions (e.g., `setCurator`, `setName`, `setSymbol`).
+- **Two-step supervisor ownership transfer** with proposal and acceptance
+- **Per-vault guardian registration** with allowlisting for vault owners to manage their own guardians
+- **Generic timelock system** for sensitive operations with guardian revocation capabilities
+- **Vault tracking and filtering** to monitor supervised and non-supervised vaults
+- **Pass-through functions** for immediate vault operations (curator, name, symbol, sentinels)
+- **Guardian proxy functionality** to act as a multi-guardian for compatible `revoke(bytes)` contracts
 
 The contract is at [src/VaultV2Supervisor.sol](src/VaultV2Supervisor.sol).
 
 ## Overview
 
-`VaultV2Supervisor` assumes it holds the `owner` privileges on one or more Vault V2 (`IVaultV2`) contracts. Rather than calling the vault directly, operators call the vault via `VaultV2Supervisor`, which adds delay and revocation controls to riskier operations like removing sentinels and changing ownership.
+`VaultV2Supervisor` is designed to own one or more Vault V2 (`IVaultV2`) contracts and add governance controls to sensitive operations. Rather than calling vault functions directly, operators interact with the vault through the supervisor, which enforces delays and guardian oversight for critical actions.
+
+The supervisor can also serve as a guardian proxy for compatible `revoke(bytes)` contracts, enabling multi-guardian setups where any registered guardian can revoke pending operations.
 
 ### Roles
-- **Owner**: Full admin of `VaultV2Supervisor`. Can perform safe vault admin calls, submit timelocked actions, and execute them after delay.
-- **Guardian**: A vault-specific safety role, registered per vault via `addGuardian(vault, guardian)`. Guardians can revoke pending timelocked actions for that vault (issued at the Supervisor or at the Vault level).
 
-### Timelock Model
-Supervisor uses a generic timelock keyed by calldata:
+- **Supervisor Owner**: Controls the supervisor contract itself. Can perform vault admin calls, submit timelocked actions, execute them after delay, and manage guardians.
+- **Pending Supervisor Owner**: Proposed new owner who must accept to complete ownership transfer.
+- **Guardian**: Vault-specific safety role registered per vault. Guardians can revoke pending timelocked actions for their assigned vault(s).
+- **Allowed Vault Owner**: Vault owners who have been allowlisted to register guardians for their own vaults.
 
-1. Owner calls `submit(bytes data)` to schedule any timelocked action. `data` is the full calldata of the target function to be executed later.
-2. After `timelock` (default 14 days), the Owner calls the target function; execution checks `timelocked()` internally to enforce the delay.
-3. A guardian of the relevant vault or the Owner can `revoke(bytes data)` to cancel a pending action before it executes.
+### Timelock System
 
-Default timelock: 14 days (immutable).
+The supervisor uses a configurable timelock (set at deployment) for sensitive operations:
 
-## Public API (selected)
+1. **Submit**: Owner calls `submit(bytes data)` to schedule a timelocked action. The full calldata is stored with an execution timestamp.
+2. **Delay**: Actions cannot be executed until the timelock period has passed.
+3. **Revoke**: Guardians of the target vault (or the supervisor owner) can call `revoke(bytes data)` to cancel pending actions.
+4. **Execute**: After the timelock expires, the owner calls the original function, which validates the timelock internally.
 
-Core ownership:
-- `owner()` / `pendingOwner()`
-- `transferOwnership(address newOwner)` → emits `OwnershipTransferStarted`
-- `acceptOwnership()` → finalizes transfer
-- `renounceOwnership()` → sets owner to zero
-- `setOwner(address newOwner)` → direct owner set (use with care)
+Timelocked actions include:
+- Vault ownership transfers (`setOwner`)
+- Guardian removal (`removeGuardian`)
 
-Guardians:
-- `addGuardian(IVaultV2 vault, address guardian)` → register guardian for a vault
-- `removeGuardian(IVaultV2 vault, address guardian)` → timelocked removal of guardian
+The timelock duration is immutable and set during deployment.
 
-Sentinel management:
-- `addSentinel(IVaultV2 vault, address account)` → immediate add
-- `removeSentinel(IVaultV2 vault, address account)` → timelocked removal (requires prior `submit` with matching calldata)
+## Public API
 
-Vault owner helpers (no timelock):
-- `setCurator(IVaultV2 vault, address newCurator)`
-- `setName(IVaultV2 vault, string newName)`
-- `setSymbol(IVaultV2 vault, string newSymbol)`
+### Deployment
 
-Events:
-- `OwnershipTransferred(previousOwner, newOwner)`
-- `RemoveSentinelSubmitted(vault, account, executeAfter)`
-- `RemoveSentinelRevoked(vault, account, guardian)`
-- `RemoveSentinelAccepted(vault, account)`
+- `constructor(uint256 timelock_)` → Deploy supervisor with custom timelock duration
 
+### Supervisor Ownership
+
+- `owner()` → Current supervisor owner
+- `pendingSupervisorOwner()` → Pending owner waiting to accept
+- `transferSupervisorOwnership(address newOwner)` → Propose new supervisor owner
+- `acceptSupervisorOwnership()` → Accept pending ownership transfer
+
+### Guardian Management
+
+- `setAllowedVaultOwner(address vaultOwner, bool allowed)` → Allow/disallow vault owner to manage guardians (in addition to the supervisor)
+- `addGuardian(address vault, address guardian)` → Add guardian for a vault (by supervisor owner or allowlisted vault owner)
+- `getGuardians(address vault)` → List all guardians for a vault
+- `removeGuardian(IVaultV2 vault, address guardian)` → **Timelocked** guardian removal
+
+### Vault Discovery
+
+- `getVaults()` → All vaults with at least one registered guardian
+- `getOwnedVaults()` → Tracked vaults currently owned by this supervisor
+- `getNonOwnedVaults()` → Tracked vaults not currently owned by this supervisor
+- `isVaultSupervised(address vault)` → Check if vault is owned by this supervisor
+
+### Timelock Operations
+
+- `submit(bytes data)` → Schedule a timelocked action for later execution
+- `revoke(bytes data)` → Cancel pending supervisor action (by guardian or owner)
+- `revokeGuardianRemoval(IVaultV2 vault, address guardian)` → Cancel pending guardian removal
+- `revokeVaultOwnerChange(IVaultV2 vault)` → Cancel pending vault ownership transfer
+- `revoke(address vault, bytes data)` → Forward revoke to vault's own timelock (guardian-only)
+
+### Immediate Vault Operations (No Timelock)
+
+- `setCurator(IVaultV2 vault, address newCurator)` → Set vault curator
+- `setName(IVaultV2 vault, string newName)` → Set vault name
+- `setSymbol(IVaultV2 vault, string newSymbol)` → Set vault symbol  
+- `addSentinel(IVaultV2 vault, address account)` → Add sentinel to vault
+- `removeSentinel(IVaultV2 vault, address sentinel)` → Remove sentinel from vault (cannot remove supervisor itself)
+- `setSkimRecipient(address skimable, address newSkimRecipient)` → Set skim recipient on adapter
+- `setSupervisorAsSentinel(IVaultV2 vault)` → Add supervisor as sentinel (permissionless)
+
+### Timelocked Vault Operations
+
+- `setOwner(IVaultV2 vault, address newOwner)` → **Timelocked** vault ownership transfer
+
+### Status Queries
+
+- `scheduledNewOwner(address vault)` → Pending new owner for vault (if any)
+- `isOwnershipChanging(address vault)` → Whether vault ownership transfer is scheduled
+- `isGuardianBeingRemoved(address vault, address guardian)` → Whether guardian removal is scheduled
+- `executableAt(bytes data)` → Execution timestamp for submitted calldata (0 if not submitted)
+
+
+## Security Notes
+
+- Timelock duration is immutable and set at deployment
+- Supervisor cannot remove itself as a sentinel (prevents lockout)
+- Guardian removal requires timelock to prevent hostile takeovers
+- Vault ownership changes are tracked to prevent multiple pending transfers
+- Two-step supervisor ownership prevents accidental transfers to wrong addresses
