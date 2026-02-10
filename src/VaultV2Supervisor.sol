@@ -112,7 +112,7 @@ contract VaultV2Supervisor {
 
     /// @notice Starts a two-step transfer of supervisor ownership.
     /// @param newOwner The proposed new owner address.
-    function setSupervisorOwner(address newOwner) external onlyOwner {
+    function transferSupervisorOwnership(address newOwner) external onlyOwner {
         require(newOwner != address(0), ZeroAddress());
         require(newOwner != owner, NoOp());
         require(newOwner != pendingSupervisorOwner, NoOp());

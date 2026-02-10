@@ -333,33 +333,33 @@ contract VaultV2SupervisorTest is Test {
         assertEq(supervisor.scheduledNewOwner(address(vault)), address(0));
     }
 
-    function test_SetSupervisorOwner_StartsTransfer() public {
-        supervisor.setSupervisorOwner(address(0x111));
+    function test_TransferSupervisorOwnership_StartsTransfer() public {
+        supervisor.transferSupervisorOwnership(address(0x111));
 
         assertEq(supervisor.owner(), OWNER);
         assertEq(supervisor.pendingSupervisorOwner(), address(0x111));
     }
 
-    function test_SetSupervisorOwner_RevertsForNonOwner() public {
+    function test_TransferSupervisorOwnership_RevertsForNonOwner() public {
         vm.prank(address(0xBAD));
         vm.expectRevert(VaultV2Supervisor.NotOwner.selector);
-        supervisor.setSupervisorOwner(address(0x111));
+        supervisor.transferSupervisorOwnership(address(0x111));
     }
 
-    function test_SetSupervisorOwner_RevertsOnZeroAddressAndNoOp() public {
+    function test_TransferSupervisorOwnership_RevertsOnZeroAddressAndNoOp() public {
         vm.expectRevert(VaultV2Supervisor.ZeroAddress.selector);
-        supervisor.setSupervisorOwner(address(0));
+        supervisor.transferSupervisorOwnership(address(0));
 
         vm.expectRevert(VaultV2Supervisor.NoOp.selector);
-        supervisor.setSupervisorOwner(OWNER);
+        supervisor.transferSupervisorOwnership(OWNER);
 
-        supervisor.setSupervisorOwner(address(0x111));
+        supervisor.transferSupervisorOwnership(address(0x111));
         vm.expectRevert(VaultV2Supervisor.NoOp.selector);
-        supervisor.setSupervisorOwner(address(0x111));
+        supervisor.transferSupervisorOwnership(address(0x111));
     }
 
     function test_AcceptSupervisorOwnership_FinalizesTransfer() public {
-        supervisor.setSupervisorOwner(address(0x111));
+        supervisor.transferSupervisorOwnership(address(0x111));
 
         vm.prank(address(0x111));
         supervisor.acceptSupervisorOwnership();
@@ -369,7 +369,7 @@ contract VaultV2SupervisorTest is Test {
     }
 
     function test_AcceptSupervisorOwnership_RevertsForNonPendingOwner() public {
-        supervisor.setSupervisorOwner(address(0x111));
+        supervisor.transferSupervisorOwnership(address(0x111));
 
         vm.prank(address(0x222));
         vm.expectRevert(VaultV2Supervisor.NotPendingSupervisorOwner.selector);
