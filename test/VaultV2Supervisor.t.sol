@@ -68,6 +68,11 @@ contract VaultV2SupervisorTest is Test {
         supervisor.setAllowedVaultOwner(OWNER, true);
     }
 
+    function test_Constructor_RevertsOnZeroTimelock() public {
+        vm.expectRevert(VaultV2Supervisor.InvalidTimelock.selector);
+        new VaultV2Supervisor(0);
+    }
+
     function test_SetCurator_Name_Symbol() public {
         supervisor.setCurator(vault, address(0x01));
         assertEq(vault.curator(), address(0x01));
@@ -77,6 +82,19 @@ contract VaultV2SupervisorTest is Test {
 
         supervisor.setSymbol(vault, "TVLT");
         assertEq(vault.symbol(), "TVLT");
+    }
+
+    function test_SetCurator_Name_Symbol_RevertOnNoOp() public {
+        vm.expectRevert(VaultV2Supervisor.NoOp.selector);
+        supervisor.setCurator(vault, CURATOR);
+
+        supervisor.setName(vault, "TestVault");
+        vm.expectRevert(VaultV2Supervisor.NoOp.selector);
+        supervisor.setName(vault, "TestVault");
+
+        supervisor.setSymbol(vault, "TVLT");
+        vm.expectRevert(VaultV2Supervisor.NoOp.selector);
+        supervisor.setSymbol(vault, "TVLT");
     }
 
     function test_SetSkimRecipient_ForwardsToTarget() public {
@@ -91,6 +109,19 @@ contract VaultV2SupervisorTest is Test {
         vm.prank(address(0xBAD));
         vm.expectRevert(VaultV2Supervisor.NotOwner.selector);
         supervisor.setSkimRecipient(address(mv1Adapter), address(0xD00D));
+    }
+
+    function test_SetAllowedVaultOwner_RevertsOnZeroAddressAndNoOp() public {
+        vm.expectRevert(VaultV2Supervisor.ZeroAddress.selector);
+        supervisor.setAllowedVaultOwner(address(0), true);
+
+        vm.expectRevert(VaultV2Supervisor.NoOp.selector);
+        supervisor.setAllowedVaultOwner(OWNER, true);
+
+        supervisor.setAllowedVaultOwner(OWNER, false);
+
+        vm.expectRevert(VaultV2Supervisor.NoOp.selector);
+        supervisor.setAllowedVaultOwner(OWNER, false);
     }
 
     function test_AddGuardian_byOwner_and_VaultOwner() public {
@@ -147,6 +178,12 @@ contract VaultV2SupervisorTest is Test {
         assertEq(supervisor.getVaults().length, 0);
     }
 
+    function test_GetOwnedAndNonOwnedVaults_WhenTrackedSetEmpty() public view {
+        assertEq(supervisor.getVaults().length, 0);
+        assertEq(supervisor.getOwnedVaults().length, 0);
+        assertEq(supervisor.getNonOwnedVaults().length, 0);
+    }
+
     function test_RemoveGuardian_KeepsVaultTrackedWhenGuardiansRemain() public {
         address guardian2 = address(0xBEE2);
 
@@ -183,6 +220,21 @@ contract VaultV2SupervisorTest is Test {
         assertFalse(vault.isSentinel(SENTINEL));
     }
 
+    function test_RemoveSentinel_RevertsWhenTryingToRemoveSupervisor() public {
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, address(supervisor));
+        supervisor.submit(data);
+
+        vm.warp(block.timestamp + TIMELOCK + 1);
+
+        vm.expectRevert(VaultV2Supervisor.CannotRemoveSupervisorSentinel.selector);
+        supervisor.removeSentinel(vault, address(supervisor));
+    }
+
+    function test_RemoveSentinel_RevertsWhenNotTimelocked() public {
+        vm.expectRevert(VaultV2Supervisor.DataNotTimelocked.selector);
+        supervisor.removeSentinel(vault, SENTINEL);
+    }
+
     function test_RevokeByGuardian_CancelsSupervisorTimelock() public {
         supervisor.addGuardian(address(vault), GUARDIAN);
 
@@ -194,6 +246,22 @@ contract VaultV2SupervisorTest is Test {
 
         vm.expectRevert(VaultV2Supervisor.DataNotTimelocked.selector);
         supervisor.removeSentinel(vault, SENTINEL);
+    }
+
+    function test_Revoke_RevertsWhenUnauthorized() public {
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, SENTINEL);
+        supervisor.submit(data);
+
+        vm.prank(address(0xBAD));
+        vm.expectRevert(VaultV2Supervisor.OnlyOwnerOrGuardian.selector);
+        supervisor.revoke(data);
+    }
+
+    function test_Revoke_RevertsWhenDataNotTimelocked() public {
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, SENTINEL);
+
+        vm.expectRevert(VaultV2Supervisor.DataNotTimelocked.selector);
+        supervisor.revoke(data);
     }
 
     function test_GuardianCanRevokeVaultTimelock() public {
@@ -221,6 +289,14 @@ contract VaultV2SupervisorTest is Test {
         assertEq(box.executableAt(bdata), 0);
     }
 
+    function test_GuardianRevokeForwarder_RevertsForNonGuardian() public {
+        bytes memory vdata = abi.encodeCall(IVaultV2.setIsAllocator, (address(0x1234), true));
+
+        vm.prank(address(0xBAD));
+        vm.expectRevert(VaultV2Supervisor.NotGuardian.selector);
+        supervisor.revoke(address(vault), vdata);
+    }
+
     function test_Timelocked_SetOwner() public {
         address newOwner = address(0x999);
         assertFalse(supervisor.isOwnershipChanging(address(vault)));
@@ -237,6 +313,36 @@ contract VaultV2SupervisorTest is Test {
         assertFalse(supervisor.isOwnershipChanging(address(vault)));
         assertEq(vault.owner(), newOwner);
         assertEq(supervisor.scheduledNewOwner(address(vault)), address(0));
+    }
+
+    function test_SetOwner_RevertsWhenNotTimelocked() public {
+        vm.expectRevert(VaultV2Supervisor.DataNotTimelocked.selector);
+        supervisor.setOwner(vault, address(0x999));
+    }
+
+    function test_Submit_RevertsOnInvalidDataAndDuplicateSubmission() public {
+        vm.expectRevert(VaultV2Supervisor.InvalidAmount.selector);
+        supervisor.submit(hex"123456");
+
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, SENTINEL);
+        supervisor.submit(data);
+
+        vm.expectRevert(VaultV2Supervisor.DataAlreadyTimelocked.selector);
+        supervisor.submit(data);
+    }
+
+    function test_Submit_SetOwner_RevertsOnZeroAddressOrNoOpOwner() public {
+        bytes memory zeroVault = abi.encodeWithSignature("setOwner(address,address)", address(0), address(0x111));
+        vm.expectRevert(VaultV2Supervisor.ZeroAddress.selector);
+        supervisor.submit(zeroVault);
+
+        bytes memory zeroOwner = abi.encodeWithSignature("setOwner(address,address)", address(vault), address(0));
+        vm.expectRevert(VaultV2Supervisor.ZeroAddress.selector);
+        supervisor.submit(zeroOwner);
+
+        bytes memory noOp = abi.encodeWithSignature("setOwner(address,address)", address(vault), address(supervisor));
+        vm.expectRevert(VaultV2Supervisor.NoOp.selector);
+        supervisor.submit(noOp);
     }
 
     function test_Submit_SetOwner_RevertsIfOwnershipAlreadyScheduled() public {
@@ -270,6 +376,14 @@ contract VaultV2SupervisorTest is Test {
         supervisor.setSupervisorOwner(address(0x111));
     }
 
+    function test_SetSupervisorOwner_RevertsOnZeroAddressAndNoOp() public {
+        vm.expectRevert(VaultV2Supervisor.ZeroAddress.selector);
+        supervisor.setSupervisorOwner(address(0));
+
+        vm.expectRevert(VaultV2Supervisor.NoOp.selector);
+        supervisor.setSupervisorOwner(OWNER);
+    }
+
     function test_AddGuardian_RevertsOnNoOpOrZeroAddress() public {
         supervisor.addGuardian(address(vault), GUARDIAN);
 
@@ -291,6 +405,43 @@ contract VaultV2SupervisorTest is Test {
 
         vm.expectRevert(VaultV2Supervisor.NoOp.selector);
         supervisor.removeGuardian(vault, GUARDIAN);
+    }
+
+    function test_RemoveGuardian_RevertsWhenNotTimelocked() public {
+        vm.expectRevert(VaultV2Supervisor.DataNotTimelocked.selector);
+        supervisor.removeGuardian(vault, GUARDIAN);
+    }
+
+    function test_SetSupervisorAsSentinel_RevertsOnNoOp() public {
+        vm.expectRevert(VaultV2Supervisor.NoOp.selector);
+        supervisor.setSupervisorAsSentinel(vault);
+    }
+
+    function test_ScheduledStateViewHelpers() public {
+        bytes memory ownerData = abi.encodeWithSignature("setOwner(address,address)", address(vault), address(0x999));
+        assertFalse(supervisor.isOwnershipChanging(address(vault)));
+        supervisor.submit(ownerData);
+        assertTrue(supervisor.isOwnershipChanging(address(vault)));
+        supervisor.revoke(ownerData);
+        assertFalse(supervisor.isOwnershipChanging(address(vault)));
+
+        supervisor.addGuardian(address(vault), GUARDIAN);
+
+        bytes memory removeGuardianData =
+            abi.encodeWithSelector(VaultV2Supervisor.removeGuardian.selector, vault, GUARDIAN);
+        assertFalse(supervisor.isGuardianBeingRemoved(address(vault), GUARDIAN));
+        supervisor.submit(removeGuardianData);
+        assertTrue(supervisor.isGuardianBeingRemoved(address(vault), GUARDIAN));
+        supervisor.revoke(removeGuardianData);
+        assertFalse(supervisor.isGuardianBeingRemoved(address(vault), GUARDIAN));
+
+        supervisor.addSentinel(vault, SENTINEL);
+        bytes memory removeSentinelData = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, SENTINEL);
+        assertFalse(supervisor.isSentinelBeingRemoved(address(vault), SENTINEL));
+        supervisor.submit(removeSentinelData);
+        assertTrue(supervisor.isSentinelBeingRemoved(address(vault), SENTINEL));
+        supervisor.revoke(removeSentinelData);
+        assertFalse(supervisor.isSentinelBeingRemoved(address(vault), SENTINEL));
     }
 
     function test_IsVaultSupervised() public view {
