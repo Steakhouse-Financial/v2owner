@@ -1,4 +1,7 @@
 {
+  "lib/box": {
+    "rev": "52ab8b9f20184c5882448df7be31701df1cf6f39"
+  },
   "lib/forge-std": {
     "tag": {
       "name": "v1.14.0",

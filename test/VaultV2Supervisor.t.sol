@@ -223,8 +223,10 @@ contract VaultV2SupervisorTest is Test {
 
     function test_Timelocked_SetOwner() public {
         address newOwner = address(0x999);
+        assertFalse(supervisor.isOwnershipChanging(address(vault)));
         bytes memory data = abi.encodeWithSignature("setOwner(address,address)", address(vault), newOwner);
         supervisor.submit(data);
+        assertTrue(supervisor.isOwnershipChanging(address(vault)));
         assertEq(supervisor.scheduledNewOwner(address(vault)), newOwner);
 
         vm.expectRevert(VaultV2Supervisor.TimelockNotExpired.selector);
@@ -232,6 +234,7 @@ contract VaultV2SupervisorTest is Test {
 
         vm.warp(block.timestamp + TIMELOCK + 1);
         supervisor.setOwner(vault, newOwner);
+        assertFalse(supervisor.isOwnershipChanging(address(vault)));
         assertEq(vault.owner(), newOwner);
         assertEq(supervisor.scheduledNewOwner(address(vault)), address(0));
     }

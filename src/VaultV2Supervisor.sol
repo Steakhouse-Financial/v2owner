@@ -139,7 +139,7 @@ contract VaultV2Supervisor {
 
     /// @notice Cancels a pending timelocked action.
     /// @param data Full calldata that was previously submitted.
-    function revoke(bytes calldata data) external {
+    function revoke(bytes calldata data) extern∏al {
         bytes4 selector = _selector(data);
         address vault = _extractVaultAddress(selector, data);
 
