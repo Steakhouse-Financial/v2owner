@@ -1,17 +1,13 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.28;
+pragma solidity ^0.8.33;
 
 import "forge-std/Test.sol";
-import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 
 import { VaultV2Supervisor } from "src/VaultV2Supervisor.sol";
 import { IVaultV2 } from "vault-v2/src/interfaces/IVaultV2.sol";
-import { VaultV2Factory } from "vault-v2/src/VaultV2Factory.sol";
-import { MorphoVaultV1AdapterFactory } from "vault-v2/src/adapters/MorphoVaultV1AdapterFactory.sol";
+import { IVaultV2Factory } from "vault-v2/src/interfaces/IVaultV2Factory.sol";
 import { IMorphoVaultV1Adapter } from "vault-v2/src/adapters/interfaces/IMorphoVaultV1Adapter.sol";
-
-import { IBox } from "box/src/interfaces/IBox.sol";
-import { BoxFactory } from "box/src/factories/BoxFactory.sol";
+import { IMorphoVaultV1AdapterFactory } from "vault-v2/src/adapters/interfaces/IMorphoVaultV1AdapterFactory.sol";
 
 import { TestAsset } from "test/helpers/TestAsset.sol";
 
@@ -19,14 +15,13 @@ contract VaultV2SupervisorTest is Test {
     uint256 constant TIMELOCK = 14 days;
 
     VaultV2Supervisor supervisor;
-    VaultV2Factory vaultFactory;
-    MorphoVaultV1AdapterFactory adapterFactory;
-    BoxFactory boxFactory;
+    IVaultV2Factory vaultFactory;
+    IMorphoVaultV1AdapterFactory adapterFactory;
 
     TestAsset asset;
     IVaultV2 vault;
+    IVaultV2 nonOwnedVault;
     IVaultV2 morphoVaultLike;
-    IBox box;
     IMorphoVaultV1Adapter mv1Adapter;
 
     address OWNER = address(this);
@@ -36,35 +31,22 @@ contract VaultV2SupervisorTest is Test {
 
     function setUp() public {
         supervisor = new VaultV2Supervisor(TIMELOCK);
-        vaultFactory = new VaultV2Factory();
-        adapterFactory = new MorphoVaultV1AdapterFactory();
-        boxFactory = new BoxFactory();
+        vaultFactory = IVaultV2Factory(deployCode("vault-v2/src/VaultV2Factory.sol:VaultV2Factory"));
+        adapterFactory = IMorphoVaultV1AdapterFactory(
+            deployCode("vault-v2/src/adapters/MorphoVaultV1AdapterFactory.sol:MorphoVaultV1AdapterFactory")
+        );
         asset = new TestAsset("Test Asset", "TAST");
 
         vault = IVaultV2(vaultFactory.createVaultV2(OWNER, address(asset), keccak256("vault-main")));
+        nonOwnedVault = IVaultV2(vaultFactory.createVaultV2(address(0xA11CE), address(asset), keccak256("vault-non-owned")));
         morphoVaultLike = IVaultV2(vaultFactory.createVaultV2(OWNER, address(asset), keccak256("vault-mv1-like")));
         mv1Adapter = IMorphoVaultV1Adapter(
             adapterFactory.createMorphoVaultV1Adapter(address(vault), address(morphoVaultLike))
-        );
-        box = boxFactory.createBox(
-            IERC20(address(asset)),
-            OWNER,
-            OWNER,
-            "Test Box",
-            "TBOX",
-            0.005 ether,
-            1 days,
-            7 days,
-            1 days,
-            keccak256("box-main")
         );
 
         vault.setOwner(address(supervisor));
         supervisor.setCurator(vault, CURATOR);
         supervisor.setSupervisorAsSentinel(vault);
-        bytes memory guardianData = abi.encodeCall(IBox.setGuardian, (address(supervisor)));
-        box.submit(guardianData);
-        box.setGuardian(address(supervisor));
         supervisor.setAllowedVaultOwner(OWNER, true);
     }
 
@@ -149,12 +131,12 @@ contract VaultV2SupervisorTest is Test {
 
     function test_GetVaults_AndOwnedBuckets() public {
         supervisor.addGuardian(address(vault), GUARDIAN);
-        supervisor.addGuardian(address(box), address(0xABCD));
+        supervisor.addGuardian(address(nonOwnedVault), address(0xABCD));
 
         address[] memory vaults = supervisor.getVaults();
         assertEq(vaults.length, 2);
         assertTrue(_contains(vaults, address(vault)));
-        assertTrue(_contains(vaults, address(box)));
+        assertTrue(_contains(vaults, address(nonOwnedVault)));
 
         address[] memory ownedVaults = supervisor.getOwnedVaults();
         assertEq(ownedVaults.length, 1);
@@ -162,7 +144,7 @@ contract VaultV2SupervisorTest is Test {
 
         address[] memory nonOwnedVaults = supervisor.getNonOwnedVaults();
         assertEq(nonOwnedVaults.length, 1);
-        assertEq(nonOwnedVaults[0], address(box));
+        assertEq(nonOwnedVaults[0], address(nonOwnedVault));
     }
 
     function test_RemoveGuardian_RemovesVaultFromTrackedSetWhenEmpty() public {
@@ -275,18 +257,6 @@ contract VaultV2SupervisorTest is Test {
         vm.prank(GUARDIAN);
         supervisor.revoke(address(vault), vdata);
         assertEq(vault.executableAt(vdata), 0);
-    }
-
-    function test_GuardianCanRevokeBoxTimelock() public {
-        supervisor.addGuardian(address(box), GUARDIAN);
-
-        bytes memory bdata = abi.encodeCall(IBox.setIsFeeder, (address(0x1234), true));
-        box.submit(bdata);
-        assertGt(box.executableAt(bdata), 0);
-
-        vm.prank(GUARDIAN);
-        supervisor.revoke(address(box), bdata);
-        assertEq(box.executableAt(bdata), 0);
     }
 
     function test_GuardianRevokeForwarder_RevertsForNonGuardian() public {
@@ -448,7 +418,7 @@ contract VaultV2SupervisorTest is Test {
 
     function test_IsVaultSupervised() public view {
         assertTrue(supervisor.isVaultSupervised(address(vault)));
-        assertFalse(supervisor.isVaultSupervised(address(box)));
+        assertFalse(supervisor.isVaultSupervised(address(nonOwnedVault)));
         assertFalse(supervisor.isVaultSupervised(address(0xB0B)));
     }
 
