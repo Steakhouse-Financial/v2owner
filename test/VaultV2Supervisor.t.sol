@@ -299,10 +299,8 @@ contract VaultV2SupervisorTest is Test {
 
     function test_Timelocked_SetOwner() public {
         address newOwner = address(0x999);
-        assertFalse(supervisor.isOwnershipChanging(address(vault)));
         bytes memory data = abi.encodeWithSignature("setOwner(address,address)", address(vault), newOwner);
         supervisor.submit(data);
-        assertTrue(supervisor.isOwnershipChanging(address(vault)));
         assertEq(supervisor.scheduledNewOwner(address(vault)), newOwner);
 
         vm.expectRevert(VaultV2Supervisor.TimelockNotExpired.selector);
@@ -417,14 +415,16 @@ contract VaultV2SupervisorTest is Test {
         supervisor.setSupervisorAsSentinel(vault);
     }
 
-    function test_ScheduledStateViewHelpers() public {
+    function test_IsOwnershipChanging_View() public {
         bytes memory ownerData = abi.encodeWithSignature("setOwner(address,address)", address(vault), address(0x999));
         assertFalse(supervisor.isOwnershipChanging(address(vault)));
         supervisor.submit(ownerData);
         assertTrue(supervisor.isOwnershipChanging(address(vault)));
         supervisor.revoke(ownerData);
         assertFalse(supervisor.isOwnershipChanging(address(vault)));
+    }
 
+    function test_IsGuardianBeingRemoved_View() public {
         supervisor.addGuardian(address(vault), GUARDIAN);
 
         bytes memory removeGuardianData =
@@ -434,7 +434,9 @@ contract VaultV2SupervisorTest is Test {
         assertTrue(supervisor.isGuardianBeingRemoved(address(vault), GUARDIAN));
         supervisor.revoke(removeGuardianData);
         assertFalse(supervisor.isGuardianBeingRemoved(address(vault), GUARDIAN));
+    }
 
+    function test_IsSentinelBeingRemoved_View() public {
         supervisor.addSentinel(vault, SENTINEL);
         bytes memory removeSentinelData = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, SENTINEL);
         assertFalse(supervisor.isSentinelBeingRemoved(address(vault), SENTINEL));
