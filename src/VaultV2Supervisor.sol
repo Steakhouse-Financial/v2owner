@@ -43,11 +43,15 @@ contract VaultV2Supervisor {
     error OwnershipChangeAlreadyScheduled();
     /// @dev Operation would not change state.
     error NoOp();
+    /// @dev Caller is not the pending supervisor owner.
+    error NotPendingSupervisorOwner();
     /// @dev Sentinel removal attempted for the supervisor address.
     error CannotRemoveSupervisorSentinel();
 
     /// @notice Emitted when the supervisor owner changes.
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    /// @notice Emitted when a new supervisor owner is proposed.
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed pendingOwner);
     /// @notice Emitted when a vault owner is allowlisted or removed.
     event AllowedVaultOwnerSet(address indexed vaultOwner, bool allowed);
     /// @notice Emitted when a timelocked action is submitted.
@@ -69,6 +73,8 @@ contract VaultV2Supervisor {
 
     /// @notice Address of the supervisor owner.
     address public owner;
+    /// @notice Proposed supervisor owner waiting to accept ownership.
+    address public pendingSupervisorOwner;
     /// @notice Timelock duration for sensitive actions, in seconds.
     uint256 public immutable timelock;
     /// @notice Execution timestamp for scheduled calldata.
@@ -104,15 +110,25 @@ contract VaultV2Supervisor {
         timelock = timelock_;
     }
 
-    /// @notice Transfers supervisor ownership.
-    /// @param newOwner The new owner address.
+    /// @notice Starts a two-step transfer of supervisor ownership.
+    /// @param newOwner The proposed new owner address.
     function setSupervisorOwner(address newOwner) external onlyOwner {
         require(newOwner != address(0), ZeroAddress());
         require(newOwner != owner, NoOp());
+        require(newOwner != pendingSupervisorOwner, NoOp());
+
+        pendingSupervisorOwner = newOwner;
+        emit OwnershipTransferStarted(owner, newOwner);
+    }
+
+    /// @notice Accepts supervisor ownership as the pending owner.
+    function acceptSupervisorOwnership() external {
+        require(msg.sender == pendingSupervisorOwner, NotPendingSupervisorOwner());
 
         address previous = owner;
-        owner = newOwner;
-        emit OwnershipTransferred(previous, newOwner);
+        owner = msg.sender;
+        pendingSupervisorOwner = address(0);
+        emit OwnershipTransferred(previous, msg.sender);
     }
 
     /// @notice Schedules a timelocked action.

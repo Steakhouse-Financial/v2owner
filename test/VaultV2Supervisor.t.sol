@@ -333,9 +333,11 @@ contract VaultV2SupervisorTest is Test {
         assertEq(supervisor.scheduledNewOwner(address(vault)), address(0));
     }
 
-    function test_SetSupervisorOwner_IsImmediate() public {
+    function test_SetSupervisorOwner_StartsTransfer() public {
         supervisor.setSupervisorOwner(address(0x111));
-        assertEq(supervisor.owner(), address(0x111));
+
+        assertEq(supervisor.owner(), OWNER);
+        assertEq(supervisor.pendingSupervisorOwner(), address(0x111));
     }
 
     function test_SetSupervisorOwner_RevertsForNonOwner() public {
@@ -350,6 +352,28 @@ contract VaultV2SupervisorTest is Test {
 
         vm.expectRevert(VaultV2Supervisor.NoOp.selector);
         supervisor.setSupervisorOwner(OWNER);
+
+        supervisor.setSupervisorOwner(address(0x111));
+        vm.expectRevert(VaultV2Supervisor.NoOp.selector);
+        supervisor.setSupervisorOwner(address(0x111));
+    }
+
+    function test_AcceptSupervisorOwnership_FinalizesTransfer() public {
+        supervisor.setSupervisorOwner(address(0x111));
+
+        vm.prank(address(0x111));
+        supervisor.acceptSupervisorOwnership();
+
+        assertEq(supervisor.owner(), address(0x111));
+        assertEq(supervisor.pendingSupervisorOwner(), address(0));
+    }
+
+    function test_AcceptSupervisorOwnership_RevertsForNonPendingOwner() public {
+        supervisor.setSupervisorOwner(address(0x111));
+
+        vm.prank(address(0x222));
+        vm.expectRevert(VaultV2Supervisor.NotPendingSupervisorOwner.selector);
+        supervisor.acceptSupervisorOwnership();
     }
 
     function test_AddGuardian_RevertsOnNoOpOrZeroAddress() public {
