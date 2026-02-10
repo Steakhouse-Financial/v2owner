@@ -296,11 +296,10 @@ contract VaultV2Supervisor {
         vault.setOwner(newOwner);
     }
 
-    /// @notice Removes a sentinel from a vault after the timelock.
+    /// @notice Removes a sentinel from a vault.
     /// @param vault The vault to update.
     /// @param sentinel The sentinel address to remove.
     function removeSentinel(IVaultV2 vault, address sentinel) external onlyOwner {
-        timelocked();
         require(sentinel != address(this), CannotRemoveSupervisorSentinel());
         vault.setIsSentinel(sentinel, false);
     }

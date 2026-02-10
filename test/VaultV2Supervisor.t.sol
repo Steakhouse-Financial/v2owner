@@ -187,51 +187,40 @@ contract VaultV2SupervisorTest is Test {
         assertEq(vaults[0], address(vault));
     }
 
-    function test_Timelocked_RemoveSentinel_Flow() public {
+    function test_RemoveSentinel_Flow() public {
         supervisor.addSentinel(vault, SENTINEL);
         assertTrue(vault.isSentinel(SENTINEL));
 
-        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, SENTINEL);
-        supervisor.submit(data);
-
-        vm.expectRevert(VaultV2Supervisor.TimelockNotExpired.selector);
-        supervisor.removeSentinel(vault, SENTINEL);
-
-        vm.warp(block.timestamp + TIMELOCK + 1);
         supervisor.removeSentinel(vault, SENTINEL);
         assertFalse(vault.isSentinel(SENTINEL));
     }
 
     function test_RemoveSentinel_RevertsWhenTryingToRemoveSupervisor() public {
-        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, address(supervisor));
-        supervisor.submit(data);
-
-        vm.warp(block.timestamp + TIMELOCK + 1);
-
         vm.expectRevert(VaultV2Supervisor.CannotRemoveSupervisorSentinel.selector);
         supervisor.removeSentinel(vault, address(supervisor));
     }
 
-    function test_RemoveSentinel_RevertsWhenNotTimelocked() public {
-        vm.expectRevert(VaultV2Supervisor.DataNotTimelocked.selector);
+    function test_RemoveSentinel_RevertsForNonOwner() public {
+        vm.prank(address(0xBAD));
+        vm.expectRevert(VaultV2Supervisor.NotOwner.selector);
         supervisor.removeSentinel(vault, SENTINEL);
     }
 
     function test_RevokeByGuardian_CancelsSupervisorTimelock() public {
         supervisor.addGuardian(address(vault), GUARDIAN);
 
-        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, SENTINEL);
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeGuardian.selector, vault, GUARDIAN);
         supervisor.submit(data);
 
         vm.prank(GUARDIAN);
         supervisor.revoke(data);
 
         vm.expectRevert(VaultV2Supervisor.DataNotTimelocked.selector);
-        supervisor.removeSentinel(vault, SENTINEL);
+        supervisor.removeGuardian(vault, GUARDIAN);
     }
 
     function test_Revoke_RevertsWhenUnauthorized() public {
-        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, SENTINEL);
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeGuardian.selector, vault, GUARDIAN);
         supervisor.submit(data);
 
         vm.prank(address(0xBAD));
@@ -240,7 +229,7 @@ contract VaultV2SupervisorTest is Test {
     }
 
     function test_Revoke_RevertsWhenDataNotTimelocked() public {
-        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, SENTINEL);
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeGuardian.selector, vault, GUARDIAN);
 
         vm.expectRevert(VaultV2Supervisor.DataNotTimelocked.selector);
         supervisor.revoke(data);
@@ -292,7 +281,7 @@ contract VaultV2SupervisorTest is Test {
         vm.expectRevert(VaultV2Supervisor.InvalidAmount.selector);
         supervisor.submit(hex"123456");
 
-        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, SENTINEL);
+        bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeGuardian.selector, vault, GUARDIAN);
         supervisor.submit(data);
 
         vm.expectRevert(VaultV2Supervisor.DataAlreadyTimelocked.selector);
@@ -432,11 +421,11 @@ contract VaultV2SupervisorTest is Test {
 
     function test_IsSentinelBeingRemoved_View() public {
         supervisor.addSentinel(vault, SENTINEL);
-        bytes memory removeSentinelData = abi.encodeWithSelector(VaultV2Supervisor.removeSentinel.selector, vault, SENTINEL);
+
         assertFalse(supervisor.isSentinelBeingRemoved(address(vault), SENTINEL));
-        supervisor.submit(removeSentinelData);
-        assertTrue(supervisor.isSentinelBeingRemoved(address(vault), SENTINEL));
-        supervisor.revoke(removeSentinelData);
+
+        supervisor.removeSentinel(vault, SENTINEL);
+
         assertFalse(supervisor.isSentinelBeingRemoved(address(vault), SENTINEL));
     }
 
