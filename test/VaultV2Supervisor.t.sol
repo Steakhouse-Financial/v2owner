@@ -376,8 +376,16 @@ contract VaultV2SupervisorTest is Test {
         supervisor.transferSupervisorOwnership(address(0x111));
     }
 
-    function test_TransferSupervisorOwnership_RevertsOnZeroAddressAndNoOp() public {
-        vm.expectRevert(VaultV2Supervisor.ZeroAddress.selector);
+    function test_TransferSupervisorOwnership_CanCancelBySettingZeroAddress() public {
+        supervisor.transferSupervisorOwnership(address(0x111));
+        assertEq(supervisor.pendingSupervisorOwner(), address(0x111));
+
+        supervisor.transferSupervisorOwnership(address(0));
+        assertEq(supervisor.pendingSupervisorOwner(), address(0));
+    }
+
+    function test_TransferSupervisorOwnership_RevertsOnNoOp() public {
+        vm.expectRevert(VaultV2Supervisor.NoOp.selector);
         supervisor.transferSupervisorOwnership(address(0));
 
         vm.expectRevert(VaultV2Supervisor.NoOp.selector);

@@ -113,9 +113,8 @@ contract VaultV2Supervisor {
     }
 
     /// @notice Starts a two-step transfer of supervisor ownership.
-    /// @param newOwner The proposed new owner address.
+    /// @param newOwner The proposed new owner address. Set to zero to cancel a pending transfer.
     function transferSupervisorOwnership(address newOwner) external onlyOwner {
-        require(newOwner != address(0), ZeroAddress());
         require(newOwner != owner, NoOp());
         require(newOwner != pendingSupervisorOwner, NoOp());
 
