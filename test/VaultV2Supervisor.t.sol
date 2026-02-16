@@ -3,13 +3,13 @@ pragma solidity 0.8.28;
 
 import "forge-std/Test.sol";
 
-import { VaultV2Supervisor } from "src/VaultV2Supervisor.sol";
-import { IVaultV2 } from "vault-v2/src/interfaces/IVaultV2.sol";
-import { VaultV2Factory } from "vault-v2/src/VaultV2Factory.sol";
-import { IMorphoVaultV1Adapter } from "vault-v2/src/adapters/interfaces/IMorphoVaultV1Adapter.sol";
-import { MorphoVaultV1AdapterFactory } from "vault-v2/src/adapters/MorphoVaultV1AdapterFactory.sol";
+import {VaultV2Supervisor} from "src/VaultV2Supervisor.sol";
+import {IVaultV2} from "vault-v2/src/interfaces/IVaultV2.sol";
+import {VaultV2Factory} from "vault-v2/src/VaultV2Factory.sol";
+import {IMorphoVaultV1Adapter} from "vault-v2/src/adapters/interfaces/IMorphoVaultV1Adapter.sol";
+import {MorphoVaultV1AdapterFactory} from "vault-v2/src/adapters/MorphoVaultV1AdapterFactory.sol";
 
-import { TestAsset } from "test/helpers/TestAsset.sol";
+import {TestAsset} from "test/helpers/TestAsset.sol";
 
 contract VaultV2SupervisorTest is Test {
     uint256 constant TIMELOCK = 14 days;
@@ -36,11 +36,11 @@ contract VaultV2SupervisorTest is Test {
         asset = new TestAsset("Test Asset", "TAST");
 
         vault = IVaultV2(vaultFactory.createVaultV2(OWNER, address(asset), keccak256("vault-main")));
-        nonOwnedVault = IVaultV2(vaultFactory.createVaultV2(address(0xA11CE), address(asset), keccak256("vault-non-owned")));
+        nonOwnedVault =
+            IVaultV2(vaultFactory.createVaultV2(address(0xA11CE), address(asset), keccak256("vault-non-owned")));
         morphoVaultLike = IVaultV2(vaultFactory.createVaultV2(OWNER, address(asset), keccak256("vault-mv1-like")));
-        mv1Adapter = IMorphoVaultV1Adapter(
-            adapterFactory.createMorphoVaultV1Adapter(address(vault), address(morphoVaultLike))
-        );
+        mv1Adapter =
+            IMorphoVaultV1Adapter(adapterFactory.createMorphoVaultV1Adapter(address(vault), address(morphoVaultLike)));
 
         vault.setOwner(address(supervisor));
         supervisor.setCurator(vault, CURATOR);
@@ -310,6 +310,44 @@ contract VaultV2SupervisorTest is Test {
         supervisor.submit(second);
     }
 
+    function test_Submit_SetOwner_RevertsOnTrailingOrDirtyBytes() public {
+        bytes memory canonical = abi.encodeWithSelector(VaultV2Supervisor.setOwner.selector, vault, address(0x999));
+        bytes memory trailing = abi.encodePacked(canonical, hex"11");
+
+        vm.expectRevert(VaultV2Supervisor.InvalidAmount.selector);
+        supervisor.submit(trailing);
+
+        bytes32 dirtyVaultWord = bytes32(uint256(uint160(address(vault))) | (uint256(1) << 200));
+        bytes memory dirty = abi.encodePacked(
+            VaultV2Supervisor.setOwner.selector, dirtyVaultWord, bytes32(uint256(uint160(address(0x999))))
+        );
+
+        vm.expectRevert(VaultV2Supervisor.InvalidAmount.selector);
+        supervisor.submit(dirty);
+
+        assertFalse(supervisor.isOwnershipChanging(address(vault)));
+    }
+
+    function test_Submit_RemoveGuardian_RevertsOnTrailingOrDirtyBytes() public {
+        supervisor.addGuardian(address(vault), GUARDIAN);
+
+        bytes memory canonical = abi.encodeWithSelector(VaultV2Supervisor.removeGuardian.selector, vault, GUARDIAN);
+        bytes memory trailing = abi.encodePacked(canonical, hex"11");
+
+        vm.expectRevert(VaultV2Supervisor.InvalidAmount.selector);
+        supervisor.submit(trailing);
+
+        bytes32 dirtyGuardianWord = bytes32(uint256(uint160(GUARDIAN)) | (uint256(1) << 200));
+        bytes memory dirty = abi.encodePacked(
+            VaultV2Supervisor.removeGuardian.selector, bytes32(uint256(uint160(address(vault)))), dirtyGuardianWord
+        );
+
+        vm.expectRevert(VaultV2Supervisor.InvalidAmount.selector);
+        supervisor.submit(dirty);
+
+        assertFalse(supervisor.isGuardianBeingRemoved(address(vault), GUARDIAN));
+    }
+
     function test_RevokeVaultOwnerChange_ClearsScheduledVaultOwner() public {
         bytes memory data = abi.encodeWithSignature("setOwner(address,address)", address(vault), address(0x999));
 
@@ -338,8 +376,16 @@ contract VaultV2SupervisorTest is Test {
         supervisor.transferSupervisorOwnership(address(0x111));
     }
 
-    function test_TransferSupervisorOwnership_RevertsOnZeroAddressAndNoOp() public {
-        vm.expectRevert(VaultV2Supervisor.ZeroAddress.selector);
+    function test_TransferSupervisorOwnership_CanCancelBySettingZeroAddress() public {
+        supervisor.transferSupervisorOwnership(address(0x111));
+        assertEq(supervisor.pendingSupervisorOwner(), address(0x111));
+
+        supervisor.transferSupervisorOwnership(address(0));
+        assertEq(supervisor.pendingSupervisorOwner(), address(0));
+    }
+
+    function test_TransferSupervisorOwnership_RevertsOnNoOp() public {
+        vm.expectRevert(VaultV2Supervisor.NoOp.selector);
         supervisor.transferSupervisorOwnership(address(0));
 
         vm.expectRevert(VaultV2Supervisor.NoOp.selector);
