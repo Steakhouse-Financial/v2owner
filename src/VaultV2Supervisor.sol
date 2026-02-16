@@ -144,11 +144,11 @@ contract VaultV2Supervisor {
         uint256 executeAfter = block.timestamp + timelock;
 
         if (selector == this.setOwner.selector) {
-            (address v, address newO) = _decodeCanonicalTwoAddressCalldata(selector, data);
-            require(v != address(0) && newO != address(0), ZeroAddress());
-            require(newO != IVaultV2(v).owner(), NoOp());
-            require(scheduledNewOwner[v] == address(0), OwnershipChangeAlreadyScheduled());
-            scheduledNewOwner[v] = newO;
+            (address vaultAddress, address newOwner) = _decodeCanonicalTwoAddressCalldata(selector, data);
+            require(vaultAddress != address(0) && newOwner != address(0), ZeroAddress());
+            require(newOwner != IVaultV2(vaultAddress).owner(), NoOp());
+            require(scheduledNewOwner[vaultAddress] == address(0), OwnershipChangeAlreadyScheduled());
+            scheduledNewOwner[vaultAddress] = newOwner;
         } else if (selector == this.removeGuardian.selector) {
             _decodeCanonicalTwoAddressCalldata(selector, data);
         }
