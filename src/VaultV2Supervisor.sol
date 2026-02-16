@@ -144,11 +144,13 @@ contract VaultV2Supervisor {
         uint256 executeAfter = block.timestamp + timelock;
 
         if (selector == this.setOwner.selector) {
-            (address v, address newO) = abi.decode(data[4:], (address, address));
+            (address v, address newO) = _decodeCanonicalTwoAddressCalldata(selector, data);
             require(v != address(0) && newO != address(0), ZeroAddress());
             require(newO != IVaultV2(v).owner(), NoOp());
             require(scheduledNewOwner[v] == address(0), OwnershipChangeAlreadyScheduled());
             scheduledNewOwner[v] = newO;
+        } else if (selector == this.removeGuardian.selector) {
+            _decodeCanonicalTwoAddressCalldata(selector, data);
         }
 
         executableAt[data] = executeAfter;
@@ -392,7 +394,24 @@ contract VaultV2Supervisor {
     function _extractVaultAddress(bytes4 selector, bytes calldata data) internal pure returns (address v) {
         if (!_selectorUsesVault(selector)) return address(0);
         if (data.length < 36) return address(0);
-        v = abi.decode(data[4:36], (address));
+        assembly {
+            v := and(calldataload(add(data.offset, 4)), 0xffffffffffffffffffffffffffffffffffffffff)
+        }
+    }
+
+    /// @dev Decodes two address arguments and enforces canonical ABI encoding (no trailing or dirty bytes).
+    function _decodeCanonicalTwoAddressCalldata(bytes4 selector, bytes calldata data)
+        internal
+        pure
+        returns (address first, address second)
+    {
+        require(data.length == 68, InvalidAmount());
+        assembly {
+            first := and(calldataload(add(data.offset, 4)), 0xffffffffffffffffffffffffffffffffffffffff)
+            second := and(calldataload(add(data.offset, 36)), 0xffffffffffffffffffffffffffffffffffffffff)
+        }
+        bytes memory canonical = abi.encodeWithSelector(selector, first, second);
+        require(keccak256(data) == keccak256(canonical), InvalidAmount());
     }
 
     function _selector(bytes calldata data) internal pure returns (bytes4 selector) {
