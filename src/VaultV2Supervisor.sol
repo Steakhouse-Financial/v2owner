@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.28;
 
-import { IVaultV2 } from "vault-v2/src/interfaces/IVaultV2.sol";
-import { EnumerableSet } from "openzeppelin-contracts/contracts/utils/structs/EnumerableSet.sol";
+import {IVaultV2} from "vault-v2/src/interfaces/IVaultV2.sol";
+import {EnumerableSet} from "openzeppelin-contracts/contracts/utils/structs/EnumerableSet.sol";
 
 interface IRevokable {
     function revoke(bytes calldata data) external;
@@ -56,11 +56,7 @@ contract VaultV2Supervisor {
     event AllowedVaultOwnerSet(address indexed vaultOwner, bool allowed);
     /// @notice Emitted when a timelocked action is submitted.
     event TimelockSubmitted(
-        address indexed sender,
-        address indexed vault,
-        bytes4 indexed selector,
-        bytes data,
-        uint256 executeAfter
+        address indexed sender, address indexed vault, bytes4 indexed selector, bytes data, uint256 executeAfter
     );
     /// @notice Emitted when a timelocked action is revoked.
     event TimelockRevoked(address indexed sender, address indexed vault, bytes4 indexed selector, bytes data);
@@ -183,33 +179,9 @@ contract VaultV2Supervisor {
     /// @param vault The vault whose ownership transfer was submitted.
     function revokeVaultOwnerChange(IVaultV2 vault) external {
         address vaultAddress = address(vault);
-        bytes memory data = abi.encodeWithSelector(
-            VaultV2Supervisor.setOwner.selector,
-            vault,
-            scheduledNewOwner[vaultAddress]
-        );
+        bytes memory data =
+            abi.encodeWithSelector(VaultV2Supervisor.setOwner.selector, vault, scheduledNewOwner[vaultAddress]);
         _revokeKnownVault(data, vaultAddress, VaultV2Supervisor.setOwner.selector);
-    }
-
-    /// @dev Internal revoke routine when the vault and selector are known.
-    function _revokeKnownVault(bytes memory data, address vault, bytes4 selector) internal {
-        require(_guardians[vault].contains(msg.sender) || msg.sender == owner, OnlyOwnerOrGuardian());
-        require(executableAt[data] != 0, DataNotTimelocked());
-
-        if (selector == this.setOwner.selector) {
-            scheduledNewOwner[vault] = address(0);
-        }
-
-        executableAt[data] = 0;
-        emit TimelockRevoked(msg.sender, vault, selector, data);
-    }
-
-    /// @dev Validates and consumes the timelock for the current calldata.
-    function timelocked() internal {
-        uint256 eta = executableAt[msg.data];
-        require(eta != 0, DataNotTimelocked());
-        require(block.timestamp >= eta, TimelockNotExpired());
-        executableAt[msg.data] = 0;
     }
 
     /// @notice Sets the curator on a vault (no timelock).
@@ -269,54 +241,12 @@ contract VaultV2Supervisor {
 
         address vaultOwner = IVaultV2(vault).owner();
         require(
-            msg.sender == owner || (msg.sender == vaultOwner && allowedVaultOwners[vaultOwner]),
-            OnlyOwnerOrVaultOwner()
+            msg.sender == owner || (msg.sender == vaultOwner && allowedVaultOwners[vaultOwner]), OnlyOwnerOrVaultOwner()
         );
 
         require(_guardians[vault].add(guardian), NoOp());
         _vaults.add(vault);
         emit GuardianAdded(vault, guardian, msg.sender);
-    }
-
-    /// @notice Returns vaults with at least one registered guardian.
-    function getVaults() external view returns (address[] memory) {
-        return _vaults.values();
-    }
-
-    /// @notice Returns tracked vaults currently owned by this supervisor.
-    function getOwnedVaults() external view returns (address[] memory ownedVaults) {
-        ownedVaults = _filterVaultsByOwnership(true);
-    }
-
-    /// @notice Returns tracked vaults not currently owned by this supervisor.
-    function getNonOwnedVaults() external view returns (address[] memory nonOwnedVaults) {
-        nonOwnedVaults = _filterVaultsByOwnership(false);
-    }
-
-    /// @dev Returns tracked vaults filtered by ownership status.
-    function _filterVaultsByOwnership(bool ownedBySupervisor) internal view returns (address[] memory vaults_) {
-        uint256 length = _vaults.length();
-        vaults_ = new address[](length);
-        uint256 count;
-
-        for (uint256 i; i < length; ++i) {
-            address vault = _vaults.at(i);
-            bool isOwned = _ownerOf(vault) == address(this);
-            if (isOwned == ownedBySupervisor) {
-                vaults_[count] = vault;
-                ++count;
-            }
-        }
-
-        assembly {
-            mstore(vaults_, count)
-        }
-    }
-
-    /// @notice Returns the guardians registered for a vault.
-    /// @param vault The vault to query.
-    function getGuardians(address vault) external view returns (address[] memory) {
-        return _guardians[vault].values();
     }
 
     /// @notice Transfers vault ownership after the timelock.
@@ -370,36 +300,25 @@ contract VaultV2Supervisor {
         vault.setIsSentinel(address(this), true);
     }
 
-    /// @dev Extracts the vault address from a supervisor calldata payload.
-    /// @dev Returns address(0) for selectors that do not target a vault.
-    /// @param selector Function selector parsed from data.
-    /// @param data Full calldata (selector + ABI args) for a supervisor action.
-    /// @return v The decoded vault address, or address(0) if data is too short.
-    function _extractVaultAddress(bytes4 selector, bytes calldata data) internal pure returns (address v) {
-        if (!_selectorUsesVault(selector)) return address(0);
-        if (data.length < 36) return address(0);
-        v = abi.decode(data[4:36], (address));
+    /// @notice Returns vaults with at least one registered guardian.
+    function getVaults() external view returns (address[] memory) {
+        return _vaults.values();
     }
 
-    function _selector(bytes calldata data) internal pure returns (bytes4 selector) {
-        if (data.length < 4) return bytes4(0);
-        assembly {
-            selector := calldataload(data.offset)
-        }
+    /// @notice Returns tracked vaults currently owned by this supervisor.
+    function getOwnedVaults() external view returns (address[] memory ownedVaults) {
+        ownedVaults = _filterVaultsByOwnership(true);
     }
 
-    /// @dev Returns whether a selector encodes a vault as first argument.
-    function _selectorUsesVault(bytes4 selector) internal pure returns (bool) {
-        return selector == this.setOwner.selector
-            || selector == this.removeSentinel.selector
-            || selector == this.removeGuardian.selector;
+    /// @notice Returns tracked vaults not currently owned by this supervisor.
+    function getNonOwnedVaults() external view returns (address[] memory nonOwnedVaults) {
+        nonOwnedVaults = _filterVaultsByOwnership(false);
     }
 
-    function _ownerOf(address vault) internal view returns (address owner_) {
-        (bool success, bytes memory returnData) =
-            vault.staticcall(abi.encodeWithSelector(IVaultV2.owner.selector));
-        if (!success || returnData.length < 32) return address(0);
-        owner_ = abi.decode(returnData, (address));
+    /// @notice Returns the guardians registered for a vault.
+    /// @param vault The vault to query.
+    function getGuardians(address vault) external view returns (address[] memory) {
+        return _guardians[vault].values();
     }
 
     /// @notice Returns whether a vault ownership transfer is currently scheduled.
@@ -420,5 +339,76 @@ contract VaultV2Supervisor {
     /// @param vault The vault address to query.
     function isVaultSupervised(address vault) external view returns (bool) {
         return _ownerOf(vault) == address(this);
+    }
+
+    /// @dev Internal revoke routine when the vault and selector are known.
+    function _revokeKnownVault(bytes memory data, address vault, bytes4 selector) internal {
+        require(_guardians[vault].contains(msg.sender) || msg.sender == owner, OnlyOwnerOrGuardian());
+        require(executableAt[data] != 0, DataNotTimelocked());
+
+        if (selector == this.setOwner.selector) {
+            scheduledNewOwner[vault] = address(0);
+        }
+
+        executableAt[data] = 0;
+        emit TimelockRevoked(msg.sender, vault, selector, data);
+    }
+
+    /// @dev Validates and consumes the timelock for the current calldata.
+    function timelocked() internal {
+        uint256 eta = executableAt[msg.data];
+        require(eta != 0, DataNotTimelocked());
+        require(block.timestamp >= eta, TimelockNotExpired());
+        executableAt[msg.data] = 0;
+    }
+
+    /// @dev Returns tracked vaults filtered by ownership status.
+    function _filterVaultsByOwnership(bool ownedBySupervisor) internal view returns (address[] memory vaults_) {
+        uint256 length = _vaults.length();
+        vaults_ = new address[](length);
+        uint256 count;
+
+        for (uint256 i; i < length; ++i) {
+            address vault = _vaults.at(i);
+            bool isOwned = _ownerOf(vault) == address(this);
+            if (isOwned == ownedBySupervisor) {
+                vaults_[count] = vault;
+                ++count;
+            }
+        }
+
+        assembly {
+            mstore(vaults_, count)
+        }
+    }
+
+    /// @dev Extracts the vault address from a supervisor calldata payload.
+    /// @dev Returns address(0) for selectors that do not target a vault.
+    /// @param selector Function selector parsed from data.
+    /// @param data Full calldata (selector + ABI args) for a supervisor action.
+    /// @return v The decoded vault address, or address(0) if data is too short.
+    function _extractVaultAddress(bytes4 selector, bytes calldata data) internal pure returns (address v) {
+        if (!_selectorUsesVault(selector)) return address(0);
+        if (data.length < 36) return address(0);
+        v = abi.decode(data[4:36], (address));
+    }
+
+    function _selector(bytes calldata data) internal pure returns (bytes4 selector) {
+        if (data.length < 4) return bytes4(0);
+        assembly {
+            selector := calldataload(data.offset)
+        }
+    }
+
+    /// @dev Returns whether a selector encodes a vault as first argument.
+    function _selectorUsesVault(bytes4 selector) internal pure returns (bool) {
+        return selector == this.setOwner.selector || selector == this.removeSentinel.selector
+            || selector == this.removeGuardian.selector;
+    }
+
+    function _ownerOf(address vault) internal view returns (address owner_) {
+        (bool success, bytes memory returnData) = vault.staticcall(abi.encodeWithSelector(IVaultV2.owner.selector));
+        if (!success || returnData.length < 32) return address(0);
+        owner_ = abi.decode(returnData, (address));
     }
 }
