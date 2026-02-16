@@ -393,8 +393,7 @@ contract VaultV2Supervisor {
 
     /// @dev Returns whether a selector encodes a vault as first argument.
     function _selectorUsesVault(bytes4 selector) internal pure returns (bool) {
-        return selector == this.setOwner.selector || selector == this.removeSentinel.selector
-            || selector == this.removeGuardian.selector;
+        return selector == this.setOwner.selector || selector == this.removeGuardian.selector;
     }
 
     function _ownerOf(address vault) internal view returns (address owner_) {
