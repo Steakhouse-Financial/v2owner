@@ -72,7 +72,7 @@ contract VaultV2Supervisor {
     /// @notice Proposed supervisor owner waiting to accept ownership.
     address public pendingSupervisorOwner;
     /// @notice Timelock duration for sensitive actions, in seconds.
-    uint256 public immutable timelock;
+    uint256 public immutable TIMELOCK;
     /// @notice Execution timestamp for scheduled calldata.
     /// @dev Keyed by the exact calldata of the action.
     mapping(bytes data => uint256) public executableAt;
@@ -109,7 +109,7 @@ contract VaultV2Supervisor {
         require(timelock_ > 0, InvalidTimelock());
         owner = msg.sender;
         emit OwnershipTransferred(address(0), msg.sender);
-        timelock = timelock_;
+        TIMELOCK = timelock_;
     }
 
     /// @notice Starts a two-step transfer of supervisor ownership.
@@ -140,7 +140,7 @@ contract VaultV2Supervisor {
 
         bytes4 selector = _selector(data);
         address vault = _extractVaultAddress(selector, data);
-        uint256 executeAfter = block.timestamp + timelock;
+        uint256 executeAfter = block.timestamp + TIMELOCK;
 
         if (selector == this.setOwner.selector) {
             (address vaultAddress, address newOwner) = _decodeCanonicalTwoAddressCalldata(selector, data);
