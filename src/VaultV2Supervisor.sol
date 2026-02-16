@@ -97,6 +97,12 @@ contract VaultV2Supervisor {
         _;
     }
 
+    /// @dev Restricts execution to the supervisor owner or a guardian registered for the vault.
+    modifier onlyOwnerOrGuardian(address vault) {
+        _checkOwnerOrGuardian(vault);
+        _;
+    }
+
     /// @notice Initializes the supervisor owner and timelock.
     /// @param timelock_ Timelock duration for sensitive actions, in seconds.
     constructor(uint256 timelock_) {
@@ -154,13 +160,14 @@ contract VaultV2Supervisor {
     function revoke(bytes calldata data) external {
         bytes4 selector = _selector(data);
         address vault = _extractVaultAddress(selector, data);
+        _checkOwnerOrGuardian(vault);
         _revokeKnownVault(data, vault, selector);
     }
 
     /// @notice Cancels a pending guardian removal timelock.
     /// @param vault The vault whose guardian removal was submitted.
     /// @param guardian The guardian address being removed.
-    function revokeGuardianRemoval(IVaultV2 vault, address guardian) external {
+    function revokeGuardianRemoval(IVaultV2 vault, address guardian) external onlyOwnerOrGuardian(address(vault)) {
         address vaultAddress = address(vault);
         bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeGuardian.selector, vault, guardian);
         _revokeKnownVault(data, vaultAddress, VaultV2Supervisor.removeGuardian.selector);
@@ -168,7 +175,7 @@ contract VaultV2Supervisor {
 
     /// @notice Cancels a pending vault ownership transfer timelock.
     /// @param vault The vault whose ownership transfer was submitted.
-    function revokeVaultOwnerChange(IVaultV2 vault) external {
+    function revokeVaultOwnerChange(IVaultV2 vault) external onlyOwnerOrGuardian(address(vault)) {
         address vaultAddress = address(vault);
         bytes memory data =
             abi.encodeWithSelector(VaultV2Supervisor.setOwner.selector, vault, scheduledNewOwner[vaultAddress]);
@@ -334,7 +341,6 @@ contract VaultV2Supervisor {
 
     /// @dev Internal revoke routine when the vault and selector are known.
     function _revokeKnownVault(bytes memory data, address vault, bytes4 selector) internal {
-        require(_guardians[vault].contains(msg.sender) || msg.sender == owner, OnlyOwnerOrGuardian());
         require(executableAt[data] != 0, DataNotTimelocked());
 
         if (selector == this.setOwner.selector) {
@@ -351,6 +357,11 @@ contract VaultV2Supervisor {
         require(eta != 0, DataNotTimelocked());
         require(block.timestamp >= eta, TimelockNotExpired());
         executableAt[msg.data] = 0;
+    }
+
+    /// @dev Validates that caller is the supervisor owner or a guardian for the vault.
+    function _checkOwnerOrGuardian(address vault) internal view {
+        require(_guardians[vault].contains(msg.sender) || msg.sender == owner, OnlyOwnerOrGuardian());
     }
 
     /// @dev Returns tracked vaults filtered by ownership status.
