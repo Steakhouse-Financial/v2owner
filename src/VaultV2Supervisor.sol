@@ -154,16 +154,7 @@ contract VaultV2Supervisor {
     function revoke(bytes calldata data) external {
         bytes4 selector = _selector(data);
         address vault = _extractVaultAddress(selector, data);
-
-        require(_guardians[vault].contains(msg.sender) || msg.sender == owner, OnlyOwnerOrGuardian());
-        require(executableAt[data] != 0, DataNotTimelocked());
-
-        if (selector == this.setOwner.selector) {
-            scheduledNewOwner[vault] = address(0);
-        }
-
-        executableAt[data] = 0;
-        emit TimelockRevoked(msg.sender, vault, selector, data);
+        _revokeKnownVault(data, vault, selector);
     }
 
     /// @notice Cancels a pending guardian removal timelock.
