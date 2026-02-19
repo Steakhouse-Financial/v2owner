@@ -37,6 +37,8 @@ contract VaultV2Supervisor {
     error OnlyOwnerOrGuardian();
     /// @dev Calldata length is invalid.
     error InvalidAmount();
+    /// @dev Selector is not supported for supervisor timelock submission.
+    error UnsupportedSelector();
     /// @dev Provided timelock duration is invalid.
     error InvalidTimelock();
     /// @dev An ownership change is already scheduled.
@@ -139,6 +141,7 @@ contract VaultV2Supervisor {
         require(data.length >= 4, InvalidAmount());
 
         bytes4 selector = _selector(data);
+        require(_selectorUsesVault(selector), UnsupportedSelector());
         address vault = _extractVaultAddress(selector, data);
         uint256 executeAfter = block.timestamp + TIMELOCK;
 
