@@ -279,6 +279,10 @@ contract VaultV2SupervisorTest is Test {
         vm.expectRevert(VaultV2Supervisor.InvalidAmount.selector);
         supervisor.submit(hex"123456");
 
+        bytes memory unsupported = abi.encodeWithSelector(VaultV2Supervisor.setCurator.selector, vault, address(0x1234));
+        vm.expectRevert(VaultV2Supervisor.UnsupportedSelector.selector);
+        supervisor.submit(unsupported);
+
         bytes memory data = abi.encodeWithSelector(VaultV2Supervisor.removeGuardian.selector, vault, GUARDIAN);
         supervisor.submit(data);
 
