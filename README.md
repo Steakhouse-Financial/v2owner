@@ -96,6 +96,14 @@ The timelock duration is immutable and set during deployment.
 - `executableAt(bytes data)` → Execution timestamp for submitted calldata (0 if not submitted)
 
 
+## Deployments
+
+| Network | Address |
+|---------|---------|
+| Ethereum | [`0x4D7bd498Bb24098Ca281C05519629c605407f71d`](https://etherscan.io/address/0x4D7bd498Bb24098Ca281C05519629c605407f71d#code) |
+| Base | [`0x639bfA26472906Ccd40513408284a8aD292bC5D6`](https://basescan.org/address/0x639bfA26472906Ccd40513408284a8aD292bC5D6#code) |
+| Arbitrum One | [`0xca9f621aAFD28d0F2decFb69Db0d9e6393A9f5ee`](https://arbiscan.io/address/0xca9f621aAFD28d0F2decFb69Db0d9e6393A9f5ee#code) |
+
 ## Security Notes
 
 - Timelock duration is immutable and set at deployment
